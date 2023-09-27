@@ -10,6 +10,7 @@ TODO:
 - should forward solution even be calculated? If yes, merge adjoint and foward solutions with a method
 - code review and tidying up
 - user input?
+- how to add obstacles for the neutrons?
 
 Author: Damian Jilk
 Date: 09/27/2023
