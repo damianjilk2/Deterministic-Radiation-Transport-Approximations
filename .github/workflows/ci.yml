@@ -1,0 +1,25 @@
+name: Continuous Integration
+
+on:
+  pull_request:
+    branches:
+      - main  # Change this to your main branch name if it's different
+
+jobs:
+  build:
+    runs-on: ubuntu-latest  # You can choose a different runner if needed
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: 3.9.7  # Specify Python version 3.9.7
+
+    - name: Install dependencies
+      run: pip install -r requirements.txt  # Make sure to have a requirements.txt file
+
+    - name: Run pytest
+      run: pytest
