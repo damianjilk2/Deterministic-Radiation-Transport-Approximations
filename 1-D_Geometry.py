@@ -7,7 +7,6 @@ This script is under construction. The goal is to approximate determinisitc radi
 Contents:
 
 TODO:
-- remove all global scope code (main function)
 - add some tests (pytest)
 - add some CI testing (Github actions)
 - how to add obstacles for the neutrons
@@ -18,16 +17,6 @@ Date: 10/03/2023
 
 import numpy as np
 import json
-
-# Load global variables from the JSON file
-with open("input_data.json", "r") as json_file:
-    data = json.load(json_file)
-
-x_min = data.get("minimum_x")
-x_max = data.get("maximum_x")
-N = data.get("number_of_voxels")  # Number of voxels
-sigma_s = data.get("scattering_cross_section")  # Scattering cross-section
-sigma_a = data.get("absorption_cross_section")  # Absorption cross-section
 
 
 def calculate_distance(x_a: float, x_b: float):
@@ -91,53 +80,67 @@ def calculate_interaction_probability(optical_distance: float):
     return np.exp(-optical_distance)
 
 
-probability_matrix = np.zeros((N, N))  # initialize probability matrix
+def main():
+    # Load global variables from the JSON file
+    with open("input_data.json", "r") as json_file:
+        data = json.load(json_file)
 
-# iterate through all voxel pairs
-for voxel_a in range(N):
-    for voxel_b in range(N):
-        distance = calculate_distance(voxel_a, voxel_b)
-        sigma_t_m = calculate_macroscopic_cross_section(sigma_s, sigma_a)
-        optical_distance = calculate_optical_distance(sigma_t_m, distance)
-        probability = calculate_interaction_probability(optical_distance)
-        probability_matrix[voxel_a, voxel_b] = probability
+    x_min = data.get("minimum_x")
+    x_max = data.get("maximum_x")
+    N = data.get("number_of_voxels")  # Number of voxels
+    sigma_s = data.get("scattering_cross_section")  # Scattering cross-section
+    sigma_a = data.get("absorption_cross_section")  # Absorption cross-section
 
-print(f"Probability matrix (H): \n{probability_matrix}")
+    probability_matrix = np.zeros((N, N))  # initialize probability matrix
+
+    # iter`ate through all voxel pairs
+    for voxel_a in range(N):
+        for voxel_b in range(N):
+            distance = calculate_distance(voxel_a, voxel_b)
+            sigma_t_m = calculate_macroscopic_cross_section(sigma_s, sigma_a)
+            optical_distance = calculate_optical_distance(sigma_t_m, distance)
+            probability = calculate_interaction_probability(optical_distance)
+            probability_matrix[voxel_a, voxel_b] = probability
+
+    print(f"Probability matrix (H): \n{probability_matrix}")
+
+    iterations = 500  # Number of iterations for the sum
+    # forward solution
+
+    # Define source distribution
+    source_location = 0  # Point source [0, ..., N-1]
+    source_distribution = np.zeros(N)
+    source_distribution[source_location] = 1
+
+    matrix_iteration = np.linalg.matrix_power(probability_matrix, 0)
+    for i in range(iterations):
+        if i == 0:
+            continue
+        matrix_iteration += np.linalg.matrix_power(probability_matrix, i)
+
+    F = np.dot(matrix_iteration, source_distribution)
+
+    print(f"Forward solution: \n{F}")
+
+    # adjoint solution
+
+    # Define adjoint source distribution
+    adj_source_location = 0  # Point source [0, ..., N-1]
+    adj_source_distribution = np.zeros(N)
+    adj_source_distribution[adj_source_location] = 1
+
+    adj_probability_matrix = np.transpose(probability_matrix)
+    adj_matrix_iteration = np.linalg.matrix_power(adj_probability_matrix, 0)
+    for i in range(iterations):
+        if i == 0:
+            continue
+        adj_matrix_iteration += np.linalg.matrix_power(
+            adj_probability_matrix, i)
+
+    A = np.dot(adj_matrix_iteration, adj_source_distribution)
+
+    print(f"Adjoint solution: \n{A}")
 
 
-iterations = 500  # Number of iterations for the sum
-# forward solution
-
-# Define source distribution
-source_location = 0  # Point source [0, ..., N-1]
-source_distribution = np.zeros(N)
-source_distribution[source_location] = 1
-
-matrix_iteration = np.linalg.matrix_power(probability_matrix, 0)
-for i in range(iterations):
-    if i == 0:
-        continue
-    matrix_iteration += np.linalg.matrix_power(probability_matrix, i)
-
-F = np.dot(matrix_iteration, source_distribution)
-
-print(f"Forward solution: \n{F}")
-
-
-# adjoint solution
-
-# Define adjoint source distribution
-adj_source_location = 0  # Point source [0, ..., N-1]
-adj_source_distribution = np.zeros(N)
-adj_source_distribution[adj_source_location] = 1
-
-adj_probability_matrix = np.transpose(probability_matrix)
-adj_matrix_iteration = np.linalg.matrix_power(adj_probability_matrix, 0)
-for i in range(iterations):
-    if i == 0:
-        continue
-    adj_matrix_iteration += np.linalg.matrix_power(adj_probability_matrix, i)
-
-A = np.dot(adj_matrix_iteration, adj_source_distribution)
-
-print(f"Adjoint solution: \n{A}")
+if __name__ == "__main__":
+    main()
