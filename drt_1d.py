@@ -7,12 +7,13 @@ This script is under construction. The goal is to approximate determinisitc radi
 Contents:
 
 TODO:
-- add some tests (pytest)
-- add some CI testing (Github actions)
-- how to add obstacles for the neutrons
+- deriving adjoint solution
+- adding obstacles
+- determining stopping criterion
+- create test problems
 
 Author: Damian Jilk
-Date: 10/03/2023
+Date: 10/04/2023
 """
 
 import numpy as np
