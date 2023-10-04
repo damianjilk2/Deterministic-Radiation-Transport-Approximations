@@ -2,30 +2,32 @@
 Title: 1-D Geometry
 
 Description:
-This script attempts to approximate determinisitc radiation transport for a 1-D geometry.
+This script is under construction. The goal is to approximate determinisitc radiation transport for a 1-D geometry.
 
 Contents:
 
 TODO:
-- should forward solution even be calculated? If yes, merge adjoint and foward solutions with a method
-- code review and tidying up
-- user input?
-- how to add obstacles for the neutrons?
-(testing PR)
+- remove all global scope code (main function)
+- add some tests (pytest)
+- add some CI testing (Github actions)
+- how to add obstacles for the neutrons
 
 Author: Damian Jilk
-Date: 09/27/2023
+Date: 10/03/2023
 """
+
 import numpy as np
+import json
 
-# Define extents of 1-D geometry
-x_min = -10.0
-x_max = 10.0
-N = 6       # Discretization of geometry (Number of voxels)
+# Load global variables from the JSON file
+with open("input_data.json", "r") as json_file:
+    data = json.load(json_file)
 
-# Define composition/properties of geometry
-sigma_s = 0.4  # Scattering cross-section
-sigma_a = 0.2  # Absorption cross-section
+x_min = data.get("minimum_x")
+x_max = data.get("maximum_x")
+N = data.get("number_of_voxels")  # Number of voxels
+sigma_s = data.get("scattering_cross_section")  # Scattering cross-section
+sigma_a = data.get("absorption_cross_section")  # Absorption cross-section
 
 
 def calculate_distance(x_a: float, x_b: float):
