@@ -12,6 +12,8 @@ def test_calculate_distance():
     assert calculate_distance(10, 7) == 3
     assert calculate_distance(0, 0) == 0  # Edge case: both points are the same
     assert calculate_distance(-5, 5) == 10  # Edge case: negative coordinates
+    # TESTING FAIL. This line should fail in the CI
+    assert calculate_distance(0, 15) == 14
 
 
 def test_calculate_macroscopic_cross_section():
