@@ -93,7 +93,7 @@ def main():
 
     probability_matrix = np.zeros((N, N))  # initialize probability matrix
 
-    # iter`ate through all voxel pairs
+    # iterate through all voxel pairs
     for voxel_a in range(N):
         for voxel_b in range(N):
             distance = calculate_distance(voxel_a, voxel_b)
