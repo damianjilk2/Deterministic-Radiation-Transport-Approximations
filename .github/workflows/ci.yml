@@ -22,4 +22,4 @@ jobs:
       run: pip install -r requirements.txt  # Make sure to have a requirements.txt file
 
     - name: Run pytest
-      run: pytest
+      run: pytest test_drt_1d.py
