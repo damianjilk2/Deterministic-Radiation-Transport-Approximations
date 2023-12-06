@@ -3,17 +3,6 @@ Title: 1-D Geometry
 
 Description:
 This script is under construction. The goal is to approximate determinisitc radiation transport for a 1-D geometry.
-
-Contents:
-
-TODO:
-- deriving adjoint solution
-- adding obstacles
-- determining stopping criterion
-- create test problems
-
-Author: Damian Jilk
-Date: 10/04/2023
 """
 
 import numpy as np
@@ -105,7 +94,7 @@ def main():
 
     print(f"Probability matrix (H): \n{probability_matrix}")
 
-    iterations = 500  # Number of iterations for the sum
+    iterations = 100  # Number of iterations for the sum
     # forward solution
 
     # Define source distribution
@@ -113,12 +102,12 @@ def main():
     source_distribution = np.zeros(N)
     source_distribution[source_location] = 1
 
-    matrix_iteration = np.linalg.matrix_power(probability_matrix, 0)
-    for i in range(iterations):
-        if i == 0:
-            continue
-        matrix_iteration += np.linalg.matrix_power(probability_matrix, i)
-
+    matrix_iteration = np.zeros((N, N))
+    tmp_matrix = np.identity(N)
+    for _ in range(iterations):
+        matrix_iteration += tmp_matrix
+        tmp_matrix = np.dot(tmp_matrix, probability_matrix)
+        
     F = np.dot(matrix_iteration, source_distribution)
 
     print(f"Forward solution: \n{F}")
@@ -131,12 +120,12 @@ def main():
     adj_source_distribution[adj_source_location] = 1
 
     adj_probability_matrix = np.transpose(probability_matrix)
-    adj_matrix_iteration = np.linalg.matrix_power(adj_probability_matrix, 0)
-    for i in range(iterations):
-        if i == 0:
-            continue
-        adj_matrix_iteration += np.linalg.matrix_power(
-            adj_probability_matrix, i)
+    
+    adj_matrix_iteration = np.zeros((N, N))
+    adj_tmp_matrix = np.identity(N)
+    for _ in range(iterations):
+        adj_matrix_iteration += adj_tmp_matrix
+        adj_tmp_matrix = np.dot(adj_tmp_matrix, adj_probability_matrix)
 
     A = np.dot(adj_matrix_iteration, adj_source_distribution)
 
