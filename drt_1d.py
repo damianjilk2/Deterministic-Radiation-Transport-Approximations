@@ -1,147 +1,118 @@
 """
-Title: 1-D Geometry
-
-Description:
-This script is under construction. The goal is to approximate determinisitc radiation transport for a 1-D geometry.
-
-Contents:
-
-TODO:
-- deriving adjoint solution
-- adding obstacles
-- determining stopping criterion
-- create test problems
-
+Title: Deterministic Radiation Trasport - 1-D Toy Problem with Voxelized Geometry
 Author: Damian Jilk
-Date: 10/04/2023
 """
 
 import numpy as np
 import json
+import csv
 
-
-def calculate_distance(x_a: float, x_b: float):
+def construct_source_term(num_voxels:int, source_voxel_index:int, source_strength:float=1):
     """
-    Calculate the distance between two points along a 1-D geometry.
+    Constructs the source term vector. Assumes a point source. Minor modifications can be made to allow for a distribution.
 
-    Args:
-        x_a (float): The x-coordinate of point A.
-        x_b (float): The x-coordinate of point B.
+    Parameters:
+    - num_voxels (int): Number of spatial elements (voxels).
+    - source_voxel_index (int): Index of the voxel where the source is located.
+    - source_strength (float, optional): Strength of the source with default value of 1.
 
     Returns:
-        float: The absolute distance between point A and point B.
+    - numpy.ndarray: Source term vector.
     """
-    return abs(x_b - x_a)
+    s = np.zeros(num_voxels)
+    s[source_voxel_index] = source_strength
+    return s
 
-# Task 2.2: Construct optical distance along ray
-
-# Calculate macroscopic cross-section (Sigma_t_m)
-
-
-def calculate_macroscopic_cross_section(sigma_s_m: float, sigma_a_m: float):
+def calculate_K_trans(ri:int, rj:int, voxel_size:float, sigma_s_matrix:np.ndarray):
     """
-    Calculate the total cross section.
+    Calculate the neutron transition probability. Used by the construct_transition_matrix function to build the K_trans matrix.
 
-    Args:
-        sigma_s_m (float): The scattering cross section.
-        sigma_a_m (float): The absorption cross section.
+    Parameters:
+    - ri (int): Index of the starting voxel.
+    - rj (int): Index of the ending voxel.
+    - voxel_size (float): Size of each voxel.
+    - sigma_s_matrix (numpy.ndarray): Diagonal matrix of scattering cross-sections.
 
     Returns:
-        float: The total cross section.
+    - float: Neutron transition probability.
     """
-    return sigma_s_m + sigma_a_m
+    min_index = min(ri, rj)
+    max_index = max(ri, rj)
+    distance = abs(ri - rj) * voxel_size
+    tau = np.sum(np.diag(sigma_s_matrix[min_index:max_index])) * voxel_size
+    return np.exp(-tau) / (4 * np.pi * distance**2)
 
-
-def calculate_optical_distance(sigma_t_m: float, distance: float):
+def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s_matrix:np.ndarray):
     """
-    Calculate the optical distance along a ray given the attenuation coefficient and distance.
+    Construct the transition matrix.
 
-    Args:
-        sigma_t_m (float): The attenuation coefficient.
-        distance (float): The physical distance along the ray.
+    Parameters:
+    - num_voxels (int): Number of spatial elements (voxels).
+    - voxel_size (float): Size of each voxel.
+    - sigma_s_matrix (numpy.ndarray): Diagonal matrix of scattering cross-sections.
 
     Returns:
-        float: The optical distance along the ray.
+    - numpy.ndarray: Transition matrix.
     """
-    return sigma_t_m * distance
+    K_trans = np.zeros((num_voxels, num_voxels))
+    for i in range(num_voxels):
+        for j in range(num_voxels):
+            if i == j:
+                # Set diagonal values to small positive value
+                K_trans[i, j] = 1e-20
+            else:
+                K_trans[i, j] = calculate_K_trans(i, j, voxel_size, sigma_s_matrix)
+    return K_trans
 
-# Task 2.3: Calculate probability of interaction
-
-
-def calculate_interaction_probability(optical_distance: float):
+def calculate_phi(K_trans:np.ndarray, sigma_s_matrix:np.ndarray, s:np.ndarray):
     """
-    Calculate the probability of interaction given the optical distance.
+    Calculate the neutron flux vector.
 
-    Args:
-        optical_distance (float): The optical distance along the ray.
+    Parameters:
+    - K_trans (numpy.ndarray): Transition matrix.
+    - sigma_s_matrix (numpy.ndarray): Diagonal matrix of scattering cross-sections.
+    - s (numpy.ndarray): Source term vector.
 
     Returns:
-        float: The probability of interaction.
+    - numpy.ndarray: Neutron flux vector.
     """
-    return np.exp(-optical_distance)
-
+    phi = np.dot(np.linalg.inv(np.eye(len(K_trans)) - np.dot(K_trans, sigma_s_matrix)), np.dot(K_trans, s))
+    return phi
 
 def main():
     # Load global variables from the JSON file
     with open("input_data.json", "r") as json_file:
-        data = json.load(json_file)
+        input_data = json.load(json_file)
 
-    x_min = data.get("minimum_x")
-    x_max = data.get("maximum_x")
-    N = data.get("number_of_voxels")  # Number of voxels
-    sigma_s = data.get("scattering_cross_section")  # Scattering cross-section
-    sigma_a = data.get("absorption_cross_section")  # Absorption cross-section
+    x_min = input_data.get("minimum_x")
+    x_max = input_data.get("maximum_x")
+    num_voxels = input_data.get("number_of_voxels") 
+    sigma_s_values = input_data.get("scattering_cross_section")
+    sigma_s_matrix = np.diag(sigma_s_values)
+    print("Scattering Cross-section Matrix (sigma_s):\n", sigma_s_matrix)
 
-    probability_matrix = np.zeros((N, N))  # initialize probability matrix
-
-    # iterate through all voxel pairs
-    for voxel_a in range(N):
-        for voxel_b in range(N):
-            distance = calculate_distance(voxel_a, voxel_b)
-            sigma_t_m = calculate_macroscopic_cross_section(sigma_s, sigma_a)
-            optical_distance = calculate_optical_distance(sigma_t_m, distance)
-            probability = calculate_interaction_probability(optical_distance)
-            probability_matrix[voxel_a, voxel_b] = probability
-
-    print(f"Probability matrix (H): \n{probability_matrix}")
-
-    iterations = 500  # Number of iterations for the sum
-    # forward solution
-
-    # Define source distribution
-    source_location = 0  # Point source [0, ..., N-1]
-    source_distribution = np.zeros(N)
-    source_distribution[source_location] = 1
-
-    matrix_iteration = np.linalg.matrix_power(probability_matrix, 0)
-    for i in range(iterations):
-        if i == 0:
-            continue
-        matrix_iteration += np.linalg.matrix_power(probability_matrix, i)
-
-    F = np.dot(matrix_iteration, source_distribution)
-
-    print(f"Forward solution: \n{F}")
-
-    # adjoint solution
-
-    # Define adjoint source distribution
-    adj_source_location = 0  # Point source [0, ..., N-1]
-    adj_source_distribution = np.zeros(N)
-    adj_source_distribution[adj_source_location] = 1
-
-    adj_probability_matrix = np.transpose(probability_matrix)
-    adj_matrix_iteration = np.linalg.matrix_power(adj_probability_matrix, 0)
-    for i in range(iterations):
-        if i == 0:
-            continue
-        adj_matrix_iteration += np.linalg.matrix_power(
-            adj_probability_matrix, i)
-
-    A = np.dot(adj_matrix_iteration, adj_source_distribution)
-
-    print(f"Adjoint solution: \n{A}")
-
+    # Calculate voxel size
+    voxel_size = (x_max - x_min) / num_voxels
+    
+    # Calculate source vector
+    s = construct_source_term(num_voxels, 2, 1) #currently using arbitrary values
+    print(f"Source Vector (s):\n{s}")
+    
+    # Calculate transition matrix
+    K_trans = construct_transition_matrix(num_voxels, voxel_size, sigma_s_matrix)
+    print(f"Transition Matrix (K_trans):\n{K_trans}")
+    
+    # Calculate neutron flux vector
+    phi = calculate_phi(K_trans, sigma_s_matrix, s)
+    print(f"Neutron Flux Vector (phi):\n{phi}")
+    
+    # Write results to CSV file
+    with open("results.csv", "w", newline="") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(["Voxel Index", "Neutron Flux"])
+        for i, flux in enumerate(phi):
+            writer.writerow([i, flux])
+    print("Results have been written to 'results.csv'.")
 
 if __name__ == "__main__":
     main()
