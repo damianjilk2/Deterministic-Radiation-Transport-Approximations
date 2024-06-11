@@ -19,6 +19,11 @@ def construct_source_term(num_voxels:int, source_voxel_index:int, source_strengt
     Returns:
     - numpy.ndarray: Source term vector.
     """
+    if num_voxels <= 0:
+        raise ValueError("Number of voxels must be a positive integer.")
+    if source_voxel_index < 0 or source_voxel_index >= num_voxels:
+        raise IndexError("Source voxel index must be within the range of voxels.")
+
     s = np.zeros(num_voxels)
     s[source_voxel_index] = source_strength
     return s
@@ -26,7 +31,9 @@ def construct_source_term(num_voxels:int, source_voxel_index:int, source_strengt
 def calculate_K_trans(ri:int, rj:int, voxel_size:float, sigma_s_matrix:np.ndarray):
     """
     Calculate the neutron transition probability. Used by the construct_transition_matrix function to build the K_trans matrix.
-
+    The current method calculates tau by summing the cross-sections that are being traveled through. The standard in place is to include the starting point but not the ending point. 
+    For example, with starting point 1 and ending 4, the cross-section values of voxels 1, 2, and 3 will be added to find the adjusted cross-section.
+    
     Parameters:
     - ri (int): Index of the starting voxel.
     - rj (int): Index of the ending voxel.
@@ -36,10 +43,15 @@ def calculate_K_trans(ri:int, rj:int, voxel_size:float, sigma_s_matrix:np.ndarra
     Returns:
     - float: Neutron transition probability.
     """
+    if voxel_size <= 0:
+        raise ValueError("Voxel size must be positive and non-zero.")
+    if ri < 0 or ri >= sigma_s_matrix.shape[0] or rj < 0 or rj >= sigma_s_matrix.shape[0]:
+        raise ValueError("Voxel indices must be non-negative and within the range of the sigma_s_matrix.")
+    
     min_index = min(ri, rj)
     max_index = max(ri, rj)
     distance = abs(ri - rj) * voxel_size
-    tau = np.sum(np.diag(sigma_s_matrix[min_index:max_index])) * voxel_size
+    tau = np.sum(np.diag(sigma_s_matrix[min_index:max_index, min_index:max_index])) * voxel_size
     return np.exp(-tau) / (4 * np.pi * distance**2)
 
 def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s_matrix:np.ndarray):
@@ -54,6 +66,11 @@ def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s_matrix
     Returns:
     - numpy.ndarray: Transition matrix.
     """
+    if num_voxels <= 0:
+        raise ValueError("Number of voxels must be positive and non-zero.")
+    if voxel_size <= 0:
+        raise ValueError("Voxel size must be positive and non-zero.")
+    
     K_trans = np.zeros((num_voxels, num_voxels))
     for i in range(num_voxels):
         for j in range(num_voxels):
@@ -86,7 +103,8 @@ def main():
 
     x_min = input_data.get("minimum_x")
     x_max = input_data.get("maximum_x")
-    num_voxels = input_data.get("number_of_voxels") 
+    num_voxels = input_data.get("number_of_voxels")
+    source_voxel_index = input_data.get("source_voxel_index")
     sigma_s_values = input_data.get("scattering_cross_section")
     sigma_s_matrix = np.diag(sigma_s_values)
     print("Scattering Cross-section Matrix (sigma_s):\n", sigma_s_matrix)
@@ -95,7 +113,7 @@ def main():
     voxel_size = (x_max - x_min) / num_voxels
     
     # Calculate source vector
-    s = construct_source_term(num_voxels, 2, 1) #currently using arbitrary values
+    s = construct_source_term(num_voxels, source_voxel_index)
     print(f"Source Vector (s):\n{s}")
     
     # Calculate transition matrix
