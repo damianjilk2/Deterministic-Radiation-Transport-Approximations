@@ -21,6 +21,12 @@ def construct_source_term(num_voxels:int, source_voxel_index:int, source_strengt
     - numpy.ndarray: Source term vector.
     """
     logging.debug("Constructing source term with %d voxels, source at index %d, strength %f", num_voxels, source_voxel_index, source_strength)
+    
+    if num_voxels <= 0:
+        raise ValueError("Number of voxels must be a positive integer.")
+    if source_voxel_index < 0 or source_voxel_index >= num_voxels:
+        raise IndexError("Source voxel index must be within the range of voxels.")
+    
     s = np.zeros(num_voxels)
     s[source_voxel_index] = source_strength
     logging.debug("Constructed source vector: %s", s)
@@ -28,7 +34,8 @@ def construct_source_term(num_voxels:int, source_voxel_index:int, source_strengt
 
 def calculate_K_trans(ri:int, rj:int, voxel_size:float, sigma_s_matrix:np.ndarray):
     """
-    Calculate the streaming operator. Used by the construct_transition_matrix function to build the K_trans matrix.
+    Calculate the streaming operator. Used by the construct_transition_matrix function to build the K_trans matrix. The current method calculates tau by summing the cross-sections that are being traveled through. The standard in place is to include the starting point but not the ending point. 
+    For example, with starting point 1 and ending 4, the cross-section values of voxels 1, 2, and 3 will be added to find the adjusted cross-section.
 
     Parameters:
     - ri (int): Index of the starting voxel.
@@ -40,6 +47,12 @@ def calculate_K_trans(ri:int, rj:int, voxel_size:float, sigma_s_matrix:np.ndarra
     - float: Streaming operator. This represents the probability that a particle born at the left side of ri streams to the left side of rj without interacting.
     """
     logging.debug("Calculating K_trans from voxel %d to voxel %d with voxel size %f", ri, rj, voxel_size)
+    
+    if voxel_size <= 0:
+        raise ValueError("Voxel size must be positive and non-zero.")
+    if ri < 0 or ri >= sigma_s_matrix.shape[0] or rj < 0 or rj >= sigma_s_matrix.shape[0]:
+        raise ValueError("Voxel indices must be non-negative and within the range of the sigma_s_matrix.")
+    
     min_index = min(ri, rj)
     min_index = min(ri, rj)
     max_index = max(ri, rj)
@@ -62,6 +75,12 @@ def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s_matrix
     - numpy.ndarray: Transition matrix.
     """
     logging.debug("Constructing transition matrix with %d voxels and voxel size %f", num_voxels, voxel_size)
+  
+    if num_voxels <= 0:
+        raise ValueError("Number of voxels must be positive and non-zero.")
+    if voxel_size <= 0:
+        raise ValueError("Voxel size must be positive and non-zero.")
+        
     K_trans = np.zeros((num_voxels, num_voxels))
     for i in range(num_voxels):
         for j in range(num_voxels):
@@ -132,6 +151,7 @@ def perform_calculation(input_data:dict):
     sigma_s_matrix = np.diag(sigma_s_values)
 
     voxel_size = (x_max - x_min) / num_voxels
+    
     s = construct_source_term(num_voxels, source_voxel_index)
     K_trans = construct_transition_matrix(num_voxels, voxel_size, sigma_s_matrix)
     phi = calculate_phi(K_trans, sigma_s_matrix, s)
