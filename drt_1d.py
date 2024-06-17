@@ -32,44 +32,47 @@ def construct_source_term(num_voxels:int, source_voxel_index:int, source_strengt
     logging.debug("Constructed source vector: %s", s)
     return s
 
-def calculate_K_trans(ri:int, rj:int, voxel_size:float, sigma_s_matrix:np.ndarray):
+def calculate_K_trans(ri:int, rj:int, voxel_size:float, sigma_s:np.ndarray):
     """
-    Calculate the streaming operator. Used by the construct_transition_matrix function to build the K_trans matrix. The current method calculates tau by summing the cross-sections that are being traveled through. The standard in place is to include the starting point but not the ending point. 
-    For example, with starting point 1 and ending 4, the cross-section values of voxels 1, 2, and 3 will be added to find the adjusted cross-section.
+    Calculate the streaming operator. Used by the construct_transition_matrix function to build the K_trans matrix.
+
+    Current method calculates tau by summing the cross-sections of the voxels from the start index to the end index, 
+    always summing from the left edge of the starting voxel to the left edge of the ending voxel, regardless of the direction of transport.
 
     Parameters:
     - ri (int): Index of the starting voxel.
     - rj (int): Index of the ending voxel.
     - voxel_size (float): Size of each voxel.
-    - sigma_s_matrix (numpy.ndarray): Diagonal matrix of scattering cross-sections.
+    - sigma_s (numpy.ndarray): Vector of scattering cross-sections.
 
     Returns:
     - float: Streaming operator. This represents the probability that a particle born at the left side of ri streams to the left side of rj without interacting.
+    
+    TODO: Update this function to accurately calculate tau for two arbitrary points within the voxelized space, considering the actual path of transport.
     """
     logging.debug("Calculating K_trans from voxel %d to voxel %d with voxel size %f", ri, rj, voxel_size)
     
     if voxel_size <= 0:
         raise ValueError("Voxel size must be positive and non-zero.")
-    if ri < 0 or ri >= sigma_s_matrix.shape[0] or rj < 0 or rj >= sigma_s_matrix.shape[0]:
+    if ri < 0 or ri >= len(sigma_s) or rj < 0 or rj >= len(sigma_s):
         raise ValueError("Voxel indices must be non-negative and within the range of the sigma_s_matrix.")
     
     min_index = min(ri, rj)
-    min_index = min(ri, rj)
     max_index = max(ri, rj)
     distance = abs(ri - rj) * voxel_size
-    tau = np.sum(np.diag(sigma_s_matrix)[min_index:max_index]) * voxel_size
+    tau = np.sum(sigma_s[min_index:max_index]) * voxel_size
     streaming_operator = np.exp(-tau) / (4 * np.pi * distance**2)
     logging.debug("Calculated K_trans: %f", streaming_operator)
     return streaming_operator
 
-def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s_matrix:np.ndarray):
+def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s:np.ndarray):
     """
     Construct the transition matrix.
 
     Parameters:
     - num_voxels (int): Number of spatial elements (voxels).
     - voxel_size (float): Size of each voxel.
-    - sigma_s_matrix (numpy.ndarray): Diagonal matrix of scattering cross-sections.
+    - sigma_s (numpy.ndarray): Vector of scattering cross-sections.
 
     Returns:
     - numpy.ndarray: Transition matrix.
@@ -88,23 +91,24 @@ def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s_matrix
                 # Set diagonal values to one based on defintion of streaming operator
                 K_trans[i, j] = 1
             else:
-                K_trans[i, j] = calculate_K_trans(i, j, voxel_size, sigma_s_matrix)
+                K_trans[i, j] = calculate_K_trans(i, j, voxel_size, sigma_s)
     logging.debug("Constructed transition matrix: %s", K_trans)
     return K_trans
 
-def calculate_phi(K_trans:np.ndarray, sigma_s_matrix:np.ndarray, s:np.ndarray):
+def calculate_phi(K_trans:np.ndarray, sigma_s:np.ndarray, s:np.ndarray):
     """
     Calculate the neutron flux vector.
 
     Parameters:
     - K_trans (numpy.ndarray): Transition matrix.
-    - sigma_s_matrix (numpy.ndarray): Diagonal matrix of scattering cross-sections.
+    - sigma_s (numpy.ndarray): Vector of scattering cross-sections.
     - s (numpy.ndarray): Source term vector.
 
     Returns:
     - numpy.ndarray: Neutron flux vector.
     """
     logging.debug("Calculating neutron flux vector")
+    sigma_s_matrix = np.diag(sigma_s) # Converts sigma_s vector to a diagonal matrix
     phi = np.dot(np.linalg.inv(np.eye(len(K_trans)) - np.dot(K_trans, sigma_s_matrix)), np.dot(K_trans, s))
     logging.debug("Calculated neutron flux vector: %s", phi)
     return phi
@@ -148,20 +152,18 @@ def perform_calculation(input_data:dict):
     num_voxels = input_data.get("number_of_voxels")
     source_voxel_index = input_data.get("source_voxel_index")
     sigma_s_values = input_data.get("scattering_cross_section")
-    sigma_s_matrix = np.diag(sigma_s_values)
 
     voxel_size = (x_max - x_min) / num_voxels
     
     s = construct_source_term(num_voxels, source_voxel_index)
-    K_trans = construct_transition_matrix(num_voxels, voxel_size, sigma_s_matrix)
-    phi = calculate_phi(K_trans, sigma_s_matrix, s)
+    K_trans = construct_transition_matrix(num_voxels, voxel_size, sigma_s_values)
+    phi = calculate_phi(K_trans, sigma_s_values, s)
     
-    logging.info("Scattering Cross-section Matrix (sigma_s):\n%s", sigma_s_matrix)
+    logging.info("Scattering Cross-section Vector (sigma_s):\n%s", sigma_s_values)
     logging.info("Source Vector (s):\n%s", s)
     logging.info("Transition Matrix (K_trans):\n%s", K_trans)
     logging.info("Neutron Flux Vector (phi):\n%s", phi)
     
-    logging.debug("Calculation result (phi): %s", phi)
     return phi
 
 def write_output(data:np.ndarray, file_path:str="results.csv"):
