@@ -1,17 +1,14 @@
 """
-Title: Deterministic Radiation Trasport - 1-D Toy Problem with Voxelized Geometry
+Title: Deterministic Radiation Transport - 1-D Toy Problem with Voxelized Geometry
 Author: Damian Jilk
 """
-# TODO: Add tests/validation to ensure tau is being calculated correctly
-# TODO: Implement default position calculation for voxels set to center
-# TODO: Handle scenarios where the user inputs multiple values for one voxel
-#       - Average the tau values to find streaming operator and then flux
-# TODO: Implement input validation and edge handling
 
 import numpy as np
 import json
 import csv
 import logging
+import itertools
+import scipy.special as sc
 
 def construct_source_term(num_voxels:int, source_voxel_index:int, source_strength:float=1):
     """
@@ -42,8 +39,8 @@ def calculate_K_trans(start_index:int, end_index:int, ri:float, rj:float, voxel_
     Calculate the streaming operator. Used by the construct_transition_matrix function to build the K_trans matrix.
 
     Parameters:
-    - start_index (int): Starting positions list index and thus voxel index
-    - end_index (int): Ending positions list index and thus voxel index
+    - start_index (int): Starting position voxel index
+    - end_index (int): Ending position voxel index
     - ri (float): Starting point within a voxelized space.
     - rj (float): Ending point within a voxelized space.
     - voxel_size (float): Size of each voxel. Assume constant.
@@ -51,6 +48,27 @@ def calculate_K_trans(start_index:int, end_index:int, ri:float, rj:float, voxel_
 
     Returns:
     - float: Streaming operator. This represents the probability that a particle born at ri streams to rj without interacting.
+    
+    Example Diagrams:
+    
+      -->  Streaming to the right -->
+    ----------------------------------------------------
+    | Start Voxel  | In-between voxels |  End Voxel  | 
+    ----------------------------------------------------
+    |---[]---------|-------------------|---------[]--|
+    |   ri         |                   |         rj  |
+        |__________|                   |__________|
+         left distance                  right distance
+         
+                  
+      <--  Streaming to the left <--
+    ----------------------------------------------------
+    | End Voxel    | In-between voxels | Start Voxel | 
+    ----------------------------------------------------
+    |---[]---------|-------------------|---------[]--|
+    |   rj         |                   |         ri  |
+        |__________|                   |__________|
+         left distance                  right distance
     """
     logging.debug("Calculating K_trans from index %d to index %d, position %.3f to position %.3f, with voxel size %f", start_index, end_index, ri, rj, voxel_size)
     
@@ -60,23 +78,47 @@ def calculate_K_trans(start_index:int, end_index:int, ri:float, rj:float, voxel_
         raise ValueError("Positions must be within the spatial domain defined by the voxels.")
     
     distance = abs(ri - rj)
+    if distance == 0:
+        raise ValueError(f"The positions of (ri,start_index):({ri},{start_index}) and (rj,end_index):({rj},{end_index}) are the same value and will result in an infinite streaming operator.")
     tau = 0
     
     if start_index == end_index:
         # Same voxel calculation
-        # NOTE: currently not being used. Will be utilized in future commit
         tau = sigma_s[start_index] * distance
+        logging.debug("Intra-voxel tau: %f", tau)
     else:
         # Multiple voxel calculation
         if ri < rj:
-            # Direction is to the right (start_index is on the left)
+            # Direction is to the right (start_index and ri are on the left)
             
             # Calculate left fraction
-            left_distance = voxel_size*(start_index+1) - ri
+            if ri == start_index*voxel_size:
+                # ri is on the left-most point of the voxel
+                left_distance = voxel_size
+            elif start_index*voxel_size < ri and ri < (start_index+1)*voxel_size:
+                # ri is between the voxel edges
+                left_distance = (start_index+1)*voxel_size - ri
+            elif ri == (start_index+1)*voxel_size:
+                # ri is on the right-most point of the voxel
+                left_distance = 0
+            else:
+                # ri is not within or on the edges of this voxel
+                raise ValueError(f"Invalid position (ri: {ri}) and voxel index (start_index: {start_index}) combination.")
             left_tau = sigma_s[start_index] * left_distance
             
             # Calculate right fraction
-            right_distance = rj - voxel_size*(end_index)
+            if rj == end_index*voxel_size:
+                # rj is on the left-most point of the voxel
+                right_distance = 0
+            elif end_index*voxel_size < rj and rj < (end_index+1)*voxel_size:
+                # rj is beteween the voxel edges
+                right_distance = rj - (end_index*voxel_size)
+            elif rj == (end_index+1)*voxel_size:
+                # rj is on the right-most point of the voxel
+                right_distance = voxel_size
+            else:
+                # rj is not within or on the edges of this voxel
+                raise ValueError(f"Invalid position (rj: {rj}) and voxel index (end_index: {end_index}) combination.")
             right_tau = sigma_s[end_index] * right_distance
             
             # Sum full voxels
@@ -85,28 +127,51 @@ def calculate_K_trans(start_index:int, end_index:int, ri:float, rj:float, voxel_
             logging.debug("Direction is to the right. Left_tau: %f, Right_tau: %f, Center_tau: %f", left_tau, right_tau, center_tau)
             tau = left_tau + right_tau + center_tau
                 
-        else:
-            # Direction is to the left (start_index is on the right)
-            
-            # Calculate right fraction
-            right_distance = ri - voxel_size*(start_index)
-            right_tau = sigma_s[start_index] * right_distance
+        elif ri > rj:
+            # Direction is to the left (start_index and ri are on the right)
             
             # Calculate left fraction
-            left_distance = voxel_size*(end_index + 1) - rj
+            if rj == end_index*voxel_size:
+                # rj is on the left-most point of the voxel
+                left_distance = voxel_size
+            elif end_index*voxel_size < rj and rj < (end_index+1)*voxel_size:
+                # rj is between the voxel edges
+                left_distance = (end_index+1)*voxel_size - rj
+            elif rj == (end_index+1)*voxel_size:
+                # rj is on the right-most point of the voxel
+                left_distance = 0
+            else:
+                # rj is not within or on the edges of this voxel
+                raise ValueError(f"Invalid position (rj: {rj}) and voxel index (end_index: {end_index}) combination.")
             left_tau = sigma_s[end_index] * left_distance
+            
+            # Calculate right fraction
+            if ri == start_index*voxel_size:
+                # ri is on the left-most point of the voxel
+                right_distance = 0
+            elif start_index*voxel_size < ri and ri < (start_index+1)*voxel_size:
+                # ri is beteween the voxel edges
+                right_distance = ri - (start_index*voxel_size)
+            elif ri == (start_index+1)*voxel_size:
+                # ri is on the right-most point of the voxel
+                right_distance = voxel_size
+            else:
+                # ri is not within or on the edges of this voxel
+                raise ValueError(f"Invalid position (ri: {ri}) and voxel index (start_index: {start_index}) combination.")
+            right_tau = sigma_s[start_index] * right_distance
             
             # Sum full voxels
             center_tau = sum(sigma_s[end_index + 1:start_index]) * voxel_size
             
-            logging.debug("Direction is to the left. Right_tau: %f, Left_tau: %f, Center_tau: %f", right_tau, left_tau, center_tau)
+            logging.debug("Direction is to the left. Left_tau: %f, Right_tau: %f, Center_tau: %f", left_tau, right_tau, center_tau)
             tau = left_tau + right_tau + center_tau
     
-    streaming_operator = np.exp(-tau) / (4 * np.pi * distance**2)
+    #streaming_operator = np.exp(-tau) / (4 * np.pi * distance**2) NOTE: this is the old streaming operator calculation
+    streaming_operator = (1/2) * sc.exp1(tau)
     logging.debug("Calculated K_trans: %f", streaming_operator)
     return streaming_operator
 
-def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s:np.ndarray, positions:list):
+def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s:np.ndarray, positions:dict):
     """
     Construct the transition matrix.
 
@@ -114,7 +179,7 @@ def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s:np.nda
     - num_voxels (int): Number of spatial elements (voxels).
     - voxel_size (float): Size of each voxel.
     - sigma_s (numpy.ndarray): Vector of scattering cross-sections.
-    - positions (list): List of positions corresponding to each voxel. Assume the list is formatted so that index zero goes with the first voxel and so forth.
+    - positions (dict): Dictionary of positions corresponding to each voxel index.
 
     Returns:
     - numpy.ndarray: Transition matrix.
@@ -130,12 +195,50 @@ def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s:np.nda
     for i in range(num_voxels):
         for j in range(num_voxels):
             if i == j:
-                # Set diagonal values to one based on defintion of streaming operator
-                K_trans[i, j] = 1
+                # Diagonal element (same voxel)
+                # Retrieve the list of positions for the current voxel i (same as j in this case)
+                positions_in_voxel = positions.get(str(i))
+                
+                # Check if there are multiple positions within this voxel
+                if len(positions_in_voxel) > 1:
+                    # Calculate the total number of position pairs (combinations of 2)
+                    position_pairs = itertools.combinations(positions_in_voxel, 2)
+                    
+                    streaming_operator_sum = 0.0
+                    num_position_pairs = 0
+                    for position_a, position_b in position_pairs:
+                        # Calculate the streaming operator for the pair (both directions)
+                        streaming_operator_sum += calculate_K_trans(i, j, position_a, position_b, voxel_size, sigma_s)
+                        streaming_operator_sum += calculate_K_trans(i, j, position_b, position_a, voxel_size, sigma_s)
+                        num_position_pairs += 2
+                    
+                    # Compute average streaming operator for this voxel and assign it to the transition matrix
+                    K_trans[i, j] = streaming_operator_sum / num_position_pairs
+                    
+                    logging.debug("Voxel %d has %d positions, average streaming operator: %f", i, len(positions_in_voxel), K_trans[i, j])
+                else:
+                    # If there is only one position, set diagonal element to 1
+                    K_trans[i, j] = 1
+                    logging.debug("Voxel %d has a single position, set K_trans[%d, %d] to 1", i, i, j)
             else:
-                ri = positions[i]
-                rj = positions[j]
-                K_trans[i, j] = calculate_K_trans(i, j, ri, rj, voxel_size, sigma_s)
+                # Off-diagonal element (different voxels)
+                positions_in_voxel_i = positions.get(str(i))
+                positions_in_voxel_j = positions.get(str(j))
+                
+                streaming_operator_sum = 0.0
+                num_position_pairs = 0
+                
+                # Iterate over all combinations of positions between voxel i and voxel j
+                for position_i in positions_in_voxel_i:
+                    for position_j in positions_in_voxel_j:
+                        # Calculate the streaming operator for the pair
+                        streaming_operator_sum += calculate_K_trans(i, j, position_i, position_j, voxel_size, sigma_s)
+                        num_position_pairs += 1
+                
+                # Compute average streaming operator between voxels and assign to the transition matrix
+                K_trans[i, j] = streaming_operator_sum / num_position_pairs
+                
+                logging.debug("Voxel pair (%d, %d) has %d position pairs, average streaming operator: %f",i, j, num_position_pairs, K_trans[i, j])
     logging.debug("Constructed transition matrix: %s", K_trans)
     return K_trans
 
@@ -197,7 +300,7 @@ def perform_calculation(input_data:dict):
     source_voxel_index = input_data.get("source_voxel_index")
     sigma_s_values = input_data.get("scattering_cross_section")
     positions = input_data.get("positions")
-
+    
     voxel_size = (x_max - x_min) / num_voxels
     
     s = construct_source_term(num_voxels, source_voxel_index)
@@ -205,6 +308,7 @@ def perform_calculation(input_data:dict):
     phi = calculate_phi(K_trans, sigma_s_values, s)
     
     logging.info("Scattering Cross-section Vector (sigma_s):\n%s", sigma_s_values)
+    logging.info("Positions:\n%s", positions)
     logging.info("Source Vector (s):\n%s", s)
     logging.info("Transition Matrix (K_trans):\n%s", K_trans)
     logging.info("Neutron Flux Vector (phi):\n%s", phi)
