@@ -1,13 +1,27 @@
 {
     "minimum_x": 0.0,
     "maximum_x": 10.0,
-    "positions": [
-        2.0,
-        4.0,
-        6.0,
-        8.0,
-        10.0
-    ],
+    "positions": {
+        "0": [
+            1.0,
+            1.005,
+            1.9
+        ],
+        "1": [
+            2.0,
+            2.2,
+            2.3
+        ],
+        "2": [
+            4.5
+        ],
+        "3": [
+            7.0
+        ],
+        "4": [
+            10.0
+        ]
+    },
     "number_of_voxels": 5,
     "source_voxel_index": 2,
     "scattering_cross_section": [
