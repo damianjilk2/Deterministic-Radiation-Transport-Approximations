@@ -2,7 +2,7 @@ from drt_1d import (
     construct_source_term,
     calculate_K_trans,
     construct_transition_matrix,
-    calculate_phi,
+    calculate_neutron_flux,
 )
 import numpy as np
 import pytest
@@ -82,19 +82,19 @@ def test_construct_transition_matrix():
     with pytest.raises(ValueError):
         construct_transition_matrix(6, 0.0, sigma_s_matrix)
 
-def test_calculate_phi():
+def test_calculate_neutron_flux():
     """Test calculation of the neutron flux vector."""
     
     # Normal case
     sigma_s_matrix = np.diag([0.2, 0.1, 0.2, 0.1, 0.3, 0.2])
     K_trans = construct_transition_matrix(6, 2.0, sigma_s_matrix)
     s = construct_source_term(6, 2)
-    phi = calculate_phi(K_trans, sigma_s_matrix, s)
+    phi = calculate_neutron_flux(K_trans, sigma_s_matrix, s)
     assert len(phi) == 6
     
     # Edge case: Zero source term
     s_zero = np.zeros(6)
-    phi_zero = calculate_phi(K_trans, sigma_s_matrix, s_zero)
+    phi_zero = calculate_neutron_flux(K_trans, sigma_s_matrix, s_zero)
     assert np.all(phi_zero == 0)
 
 if __name__ == "__main__":

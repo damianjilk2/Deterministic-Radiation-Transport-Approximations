@@ -7,10 +7,13 @@ import numpy as np
 import json
 import csv
 import logging
+import argparse
 
 def construct_source_term(num_voxels:int, source_voxel_index:int, source_strength:float=1):
     """
-    Constructs the source term vector. Assumes a point source. Minor modifications can be made to allow for a distribution.
+    Constructs the source term vector. 
+    
+    Assumes a point source. Minor modifications can be made to allow for a distribution.
 
     Parameters:
     - num_voxels (int): Number of spatial elements (voxels).
@@ -20,24 +23,30 @@ def construct_source_term(num_voxels:int, source_voxel_index:int, source_strengt
     Returns:
     - numpy.ndarray: Source term vector.
     """
-    logging.debug("Constructing source term with %d voxels, source at index %d, strength %f", num_voxels, source_voxel_index, source_strength)
+    logging.debug(f"Constructing source term with {num_voxels} voxels, source at index {source_voxel_index}, strength {source_strength}")
     
-    if num_voxels <= 0:
+    if not isinstance(num_voxels, int) or num_voxels <= 0:
         raise ValueError("Number of voxels must be a positive integer.")
-    if source_voxel_index < 0 or source_voxel_index >= num_voxels:
+    if not isinstance(source_voxel_index, int) or source_voxel_index < 0 or source_voxel_index >= num_voxels:
         raise IndexError("Source voxel index must be within the range of voxels.")
     
     s = np.zeros(num_voxels)
     s[source_voxel_index] = source_strength
-    logging.debug("Constructed source vector: %s", s)
+    logging.debug(f"Constructed source vector: {s}")
     return s
 
 def calculate_K_trans(ri:int, rj:int, voxel_size:float, sigma_s:np.ndarray):
     """
-    Calculate the streaming operator. Used by the construct_transition_matrix function to build the K_trans matrix.
+    Calculate the streaming operator. 
+    
+    Used by the construct_transition_matrix function to build the K_trans matrix.
 
     Current method calculates tau by summing the cross-sections of the voxels from the start index to the end index, 
     always summing from the left edge of the starting voxel to the left edge of the ending voxel, regardless of the direction of transport.
+    
+    The calculation assumes equal voxel spacing.
+    
+    Based on principles from the book by Lewis and Miller (1984). Equations derived using Chapter 5. 
 
     Parameters:
     - ri (int): Index of the starting voxel.
@@ -50,7 +59,7 @@ def calculate_K_trans(ri:int, rj:int, voxel_size:float, sigma_s:np.ndarray):
     
     TODO: Update this function to accurately calculate tau for two arbitrary points within the voxelized space, considering the actual path of transport.
     """
-    logging.debug("Calculating K_trans from voxel %d to voxel %d with voxel size %f", ri, rj, voxel_size)
+    logging.debug(f"Calculating K_trans from voxel {ri} to voxel {rj} with voxel size {voxel_size}")
     
     if voxel_size <= 0:
         raise ValueError("Voxel size must be positive and non-zero.")
@@ -62,7 +71,7 @@ def calculate_K_trans(ri:int, rj:int, voxel_size:float, sigma_s:np.ndarray):
     distance = abs(ri - rj) * voxel_size
     tau = np.sum(sigma_s[min_index:max_index]) * voxel_size
     streaming_operator = np.exp(-tau) / (4 * np.pi * distance**2)
-    logging.debug("Calculated K_trans: %f", streaming_operator)
+    logging.debug(f"Calculated K_trans: {streaming_operator}")
     return streaming_operator
 
 def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s:np.ndarray):
@@ -77,7 +86,7 @@ def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s:np.nda
     Returns:
     - numpy.ndarray: Transition matrix.
     """
-    logging.debug("Constructing transition matrix with %d voxels and voxel size %f", num_voxels, voxel_size)
+    logging.debug(f"Constructing transition matrix with {num_voxels} voxels and voxel size {voxel_size}")
   
     if num_voxels <= 0:
         raise ValueError("Number of voxels must be positive and non-zero.")
@@ -92,10 +101,10 @@ def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s:np.nda
                 K_trans[i, j] = 1
             else:
                 K_trans[i, j] = calculate_K_trans(i, j, voxel_size, sigma_s)
-    logging.debug("Constructed transition matrix: %s", K_trans)
+    logging.debug(f"Constructed transition matrix: {K_trans}")
     return K_trans
 
-def calculate_phi(K_trans:np.ndarray, sigma_s:np.ndarray, s:np.ndarray):
+def calculate_neutron_flux(K_trans:np.ndarray, sigma_s:np.ndarray, s:np.ndarray):
     """
     Calculate the neutron flux vector.
 
@@ -110,7 +119,7 @@ def calculate_phi(K_trans:np.ndarray, sigma_s:np.ndarray, s:np.ndarray):
     logging.debug("Calculating neutron flux vector")
     sigma_s_matrix = np.diag(sigma_s) # Converts sigma_s vector to a diagonal matrix
     phi = np.dot(np.linalg.inv(np.eye(len(K_trans)) - np.dot(K_trans, sigma_s_matrix)), np.dot(K_trans, s))
-    logging.debug("Calculated neutron flux vector: %s", phi)
+    logging.debug(f"Calculated neutron flux vector: {phi}")
     return phi
 
 def read_input(file_path:str):
@@ -123,17 +132,17 @@ def read_input(file_path:str):
     Returns:
     - dict: A dictionary containing the input parameters loaded from the JSON file.
     """
-    logging.debug("Reading input from %s", file_path)
+    logging.debug(f"Reading input from {file_path}")
     try:
         with open(file_path, "r") as json_file:
             data = json.load(json_file)
-        logging.debug("Input data: %s", data)
-    except FileNotFoundError:
-        logging.error("File %s not found.", file_path)
-        raise
-    except json.JSONDecodeError:
-        logging.error("Error decoding JSON from file %s.", file_path)
-        raise
+        logging.debug(f"Input data: {data}")
+    except FileNotFoundError as e:
+        logging.error(f"File {file_path} not found: {e}")
+        raise e
+    except json.JSONDecodeError as e:
+        logging.error(f"Error decoding JSON from file {file_path}: {e}")
+        raise e
     return data
 
 def perform_calculation(input_data:dict):
@@ -146,7 +155,7 @@ def perform_calculation(input_data:dict):
     Returns:
     - numpy.ndarray: The neutron flux vector calculated from the input data.
     """
-    logging.debug("Performing calculation with input data: %s", input_data)
+    logging.debug(f"Performing calculation with input data: {input_data}")
     x_min = input_data.get("minimum_x")
     x_max = input_data.get("maximum_x")
     num_voxels = input_data.get("number_of_voxels")
@@ -157,12 +166,12 @@ def perform_calculation(input_data:dict):
     
     s = construct_source_term(num_voxels, source_voxel_index)
     K_trans = construct_transition_matrix(num_voxels, voxel_size, sigma_s_values)
-    phi = calculate_phi(K_trans, sigma_s_values, s)
+    phi = calculate_neutron_flux(K_trans, sigma_s_values, s)
     
-    logging.info("Scattering Cross-section Vector (sigma_s):\n%s", sigma_s_values)
-    logging.info("Source Vector (s):\n%s", s)
-    logging.info("Transition Matrix (K_trans):\n%s", K_trans)
-    logging.info("Neutron Flux Vector (phi):\n%s", phi)
+    logging.info(f"Scattering Cross-section Vector (sigma_s):\n{sigma_s_values}")
+    logging.info(f"Source Vector (s):\n{s}")
+    logging.info(f"Transition Matrix (K_trans):\n{K_trans}")
+    logging.info(f"Neutron Flux Vector (phi):\n{phi}")
     
     return phi
 
@@ -177,17 +186,17 @@ def write_output(data:np.ndarray, file_path:str="results.csv"):
     Returns:
     - None
     """
-    logging.debug("Writing data to CSV file %s", file_path)
+    logging.debug(f"Writing data to CSV file {file_path}")
     try:
         with open(file_path, 'w', newline='') as file:
             writer = csv.writer(file)
             writer.writerow(["Voxel Index", "Neutron Flux"])
             for i, flux in enumerate(data):
                 writer.writerow([i, flux])
-        logging.info("Data written to CSV file %s", file_path)
+        logging.info(f"Data written to CSV file {file_path}")
     except Exception as e:
-        logging.error("Error writing to CSV file: %s", e)
-        raise
+        logging.error(f"Error writing to CSV file: {e}")
+        raise e
 
 def setup_logging(level:int = logging.INFO):
     """
@@ -206,10 +215,28 @@ def setup_logging(level:int = logging.INFO):
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
+def parse_arguments():
+    """
+    Parses command-line arguments.
+    
+    Returns:
+    - argparse.Namespace: A namespace containing the parsed arguments.
+    """
+    parser = argparse.ArgumentParser(description='Deterministic Radiation Transport Calculation.')
+    parser.add_argument(
+        '--input_file',
+        type=str,
+        default='input_data.json',
+        help='Path to the JSON file containing input data. Defaults to "input_data.json".'
+    )
+    return parser.parse_args()
+
 def main():
     setup_logging()
     logging.debug("Main function started")
-    input_data = read_input("input_data.json")
+    args = parse_arguments()
+    input_file_path = args.input_file
+    input_data = read_input(input_file_path)
     phi = perform_calculation(input_data)
     write_output(phi)
 
