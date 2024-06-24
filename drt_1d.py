@@ -95,12 +95,12 @@ def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s:np.nda
         
     K_trans = np.zeros((num_voxels, num_voxels))
     for i in range(num_voxels):
-        for j in range(num_voxels):
-            if i == j:
-                # Set diagonal values to one based on defintion of streaming operator
-                K_trans[i, j] = 1
-            else:
-                K_trans[i, j] = calculate_K_trans(i, j, voxel_size, sigma_s)
+        # Set diagonal values to one 
+        K_trans[i,i] = 1
+        for j in range(i):
+            K_trans[i, j] = calculate_K_trans(i, j, voxel_size, sigma_s)
+            # The transition matrix is symmetric
+            K_trans[j,i] = K_trans[i,j]
     logging.debug(f"Constructed transition matrix: {K_trans}")
     return K_trans
 
