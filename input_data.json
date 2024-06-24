@@ -1,7 +1,15 @@
 {
     "minimum_x": -10.0,
     "maximum_x": 10.0,
-    "number_of_voxels": 6,
-    "scattering_cross_section": 0.4,
-    "absorption_cross_section": 0.2
+    "number_of_voxels": 7,
+    "source_voxel_index": 2,
+    "scattering_cross_section": [
+        0.2,
+        0.1,
+        0.2,
+        0.1,
+        0.3,
+        0.2,
+        0.4
+    ]
 }
