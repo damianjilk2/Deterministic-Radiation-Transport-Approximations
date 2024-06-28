@@ -10,9 +10,19 @@ import logging
 import argparse
 import itertools
 import scipy.special as sc
+import random
 
 class Voxel:
     def __init__(self, index:int, start_position:float, end_position:float, scattering_cross_section:float, positions:list):
+        """
+        Represents a voxel in the 1-D space.
+
+        Parameters:
+        - index (int): Index of the voxel.
+        - start_position (float): Starting position of the voxel.
+        - end_position (float): Ending position of the voxel.
+        - scattering_cross_section (float): Scattering cross-section of the voxel.
+        """
         self.index = index
         self.start_position = start_position
         self.end_position = end_position
@@ -28,10 +38,12 @@ class Voxel:
         
     @property
     def voxel_size(self) -> float:
+        """Calculate and return the size of the voxel."""
         return self.end_position - self.start_position
     
     @property
     def number_of_positions(self) -> int:
+        """Calculate and return the number of positions."""
         return len(self.positions)
 
 def construct_source_term(num_voxels:int, source_voxel_index:int, source_strength:float=1.) -> np.ndarray:
@@ -48,19 +60,6 @@ def construct_source_term(num_voxels:int, source_voxel_index:int, source_strengt
     Returns:
     - numpy.ndarray: Source term vector.
     """
-    if not isinstance(num_voxels, int) or num_voxels <= 0:
-        error_msg = f"Number of voxels must be a positive integer. Received: {num_voxels}"
-        logging.error(error_msg)
-        raise ValueError(error_msg)
-    if not isinstance(source_voxel_index, int) or source_voxel_index < 0 or source_voxel_index >= num_voxels:
-        error_msg = f"Source voxel index must be within the range of voxels (0 to {num_voxels-1}). Received: {source_voxel_index}"
-        logging.error(error_msg)
-        raise IndexError(error_msg)
-    if not isinstance(source_strength, (int, float)) or source_strength < 0:
-        error_msg = f"Source strength must be a non-negative number. Received: {source_strength}"
-        logging.error(error_msg)
-        raise ValueError(error_msg)
-    
     logging.debug(f"Constructing source term with {num_voxels} voxels, source at index {source_voxel_index}, strength {source_strength}")
     
     s = np.zeros(num_voxels)
@@ -74,8 +73,6 @@ def calculate_K_trans(start_position:float, end_position:float, voxels:list[Voxe
     
     Used by the construct_transition_matrix function to build the K_trans matrix.
     
-    The calculation currently assumes equal voxel spacing but will be refactored soon.
-    
     Based on principles from the book by Lewis and Miller (1984). Equations derived using Chapter 5. 
 
     Parameters:
@@ -86,15 +83,6 @@ def calculate_K_trans(start_position:float, end_position:float, voxels:list[Voxe
     Returns:
     - float: Streaming operator. TODO: better understand what this value represents.
     """
-    if not isinstance(start_position, (int, float)) or not isinstance(end_position, (int, float)):
-        error_msg = f"Start and end positions must be numbers. Received: start={start_position}, end={end_position}"
-        logging.error(error_msg)
-        raise ValueError(error_msg)
-    if not voxels:
-        error_msg = "Voxels list cannot be empty."
-        logging.error(error_msg)
-        raise ValueError(error_msg)
-    
     if end_position - start_position == 0:
         return 1.0  #TODO revisit this assumption after better understanding the streaming operator.
     
@@ -107,7 +95,7 @@ def calculate_K_trans(start_position:float, end_position:float, voxels:list[Voxe
     start_voxel = voxels[0]
     end_voxel = voxels[-1]
     
-    # NOTE: assume equal voxel size for now. Future implementations will have variable voxel sizes.
+    # TODO: assume equal voxel size for now. Future implementations will have variable voxel sizes.
     voxel_size = start_voxel.voxel_size
     sigma_s = [voxel.scattering_cross_section for voxel in voxels]
     
@@ -140,13 +128,6 @@ def construct_transition_matrix(voxels:list[Voxel]) -> np.ndarray:
     Returns:
     - numpy.ndarray: Transition matrix.
     """
-    # NOTE: Assume sigma_s is still voxel based (will change with continuous geometry)
-    
-    if not voxels:
-        error_msg = "Voxels list cannot be empty."
-        logging.error(error_msg)
-        raise ValueError(error_msg)
-    
     logging.debug("Constructing transition matrix")
     
     num_voxels = len(voxels)
@@ -154,7 +135,7 @@ def construct_transition_matrix(voxels:list[Voxel]) -> np.ndarray:
     
     for i, voxel_i in enumerate(voxels):
         if voxel_i.number_of_positions == 1:
-            K_trans[i,i] = 1        # TODO need to revisit this assumption
+            K_trans[i,i] = 1                    # TODO need to revisit this assumption
             logging.debug(f"Voxel {i} has a single position; K_trans[{i},{i}] set to 1")
         else:
             position_pairs = list(itertools.combinations(voxel_i.positions, 2))
@@ -192,19 +173,6 @@ def calculate_neutron_flux(K_trans:np.ndarray, sigma_s:list, s:np.ndarray) -> np
     Returns:
     - numpy.ndarray: Neutron flux vector.
     """
-    if K_trans.shape[0] != K_trans.shape[1]:
-        error_msg = f"K_trans must be a square matrix. Received: {K_trans.shape}"
-        logging.error(error_msg)
-        raise ValueError(error_msg)
-    if len(sigma_s) != K_trans.shape[0]:
-        error_msg = "Length of sigma_s must match the dimension of K_trans."
-        logging.error(error_msg)
-        raise ValueError(error_msg)
-    if s.shape[0] != K_trans.shape[0]:
-        error_msg = "Length of source vector s must match the dimension of K_trans."
-        logging.error(error_msg)
-        raise ValueError(error_msg)
-    
     logging.debug("Calculating neutron flux")
     
     sigma_s_matrix = np.diag(sigma_s)
@@ -241,50 +209,62 @@ def read_input(file_path:str) -> dict:
         raise e
     return data
 
-def perform_calculation(input_data:dict) -> np.ndarray:
+def perform_calculation(start_x:float, regions_data:list, source_data:dict) -> np.ndarray:
     """
     Performs the main calculation for the neutron flux based on input parameters.
 
     Parameters:
-    - input_data (dict): A dictionary containing input parameters including spatial boundaries, voxel count, source index, and scattering cross-sections.
+    - start_x (float): Starting x-value for the calculation.
+    - regions_data (list): List of dictionaries containing region parameters consisting of name, width, num_voxels, positions_per_voxel, position_location, and scattering_cross_section.
+    - source_data (dict): Dictionary containing source parameters consisting of voxel_index and strength. 
 
     Returns:
     - numpy.ndarray: The neutron flux vector calculated from the input data.
     """
-    logging.debug(f"Performing calculation with input data: {input_data}")
-    
-    voxels_data = input_data['voxels']
-    if not isinstance(voxels_data, list) or len(voxels_data) == 0:
-        error_msg = "Voxels data must be a non-empty list."
-        logging.error(error_msg)
-        raise ValueError(error_msg)
+    logging.debug(f"Performing calculation with input data: start_x={start_x}, regions_data={regions_data}, source_data={source_data}")
     
     voxels:list[Voxel] = []
-    for voxel_data in voxels_data:
-        voxel = Voxel(
-            index=voxel_data["index"],
-            start_position=voxel_data["start_position"],
-            end_position=voxel_data["end_position"],
-            scattering_cross_section=voxel_data["scattering_cross_section"],
-            positions=voxel_data["positions"]
-        )
-        voxels.append(voxel)
-    if not voxels:
-        error_msg = "No voxels found in input data."
-        logging.error(error_msg)
-        raise ValueError(error_msg)
+    total_num_voxels = 0
     
-    source_voxel_index = input_data['source_voxel_index']
-    if not(0 <= source_voxel_index < len(voxels)):
-        error_msg = "Source voxel index out of bounds."
-        logging.error(error_msg)
-        raise ValueError(error_msg)
+    # Read through the regions_data and create Voxel objects accordingly. 
+    for index, region_data in enumerate(regions_data):
+        width = region_data['width']
+        num_voxels = region_data['num_voxels']
+        positions_per_voxel = region_data['positions_per_voxel']
+        position_location = region_data['position_location']
+        scattering_cross_section = region_data['scattering_cross_section']
+
+        total_num_voxels += num_voxels
+        
+        voxel_width = width / num_voxels
+        for voxel_index in range(num_voxels):
+            start_position = start_x + index*width + voxel_index*voxel_width
+            end_position = start_position + voxel_width
+            positions = []
+
+            if position_location == 'evenly-spaced':
+                # Evenly spaced between the two end points, excluding the end points themselves.
+                positions = np.linspace(start_position, end_position, positions_per_voxel + 2)[1:-1].tolist()
+            elif position_location == 'random':
+                positions = sorted([random.uniform(start_position, end_position) for _ in range(positions_per_voxel)])
+
+            voxel = Voxel(
+                index = len(voxels),
+                start_position = start_position,
+                end_position = end_position,
+                scattering_cross_section = scattering_cross_section,
+                positions = positions
+            )
+            voxels.append(voxel)
+    
+    source_voxel_index = source_data['voxel_index']
+    source_strength = source_data['strength']
+    
+    s = construct_source_term(total_num_voxels, source_voxel_index, source_strength)
+    K_trans = construct_transition_matrix(voxels)
     
     sigma_s_values = [voxel.scattering_cross_section for voxel in voxels]
-    num_voxels = len(voxels)
     
-    s = construct_source_term(num_voxels, source_voxel_index)
-    K_trans = construct_transition_matrix(voxels)
     phi = calculate_neutron_flux(K_trans, sigma_s_values, s)
     
     return phi
@@ -293,8 +273,6 @@ def validate_input(input_data:dict) -> None:
     """
     Validates the overall input data structure and key parameters.
     
-    NOTE: possible implementation could look at start and end positions of the voxels and ensure the user did create gaps.
-
     Parameters:
     - input_data (dict): The input data to be validated.
 
@@ -305,52 +283,62 @@ def validate_input(input_data:dict) -> None:
     - ValueError: If any validation checks fail.
     """
     logging.debug("Validating input data")
-    try:
-        if 'voxels' not in input_data or not isinstance(input_data['voxels'], list):
-            raise ValueError("Input must contain a list of voxels.")
-
-        # Sort voxels by start_position if they are out of order.
-        voxels = sorted(input_data['voxels'], key=lambda x: x['start_position'])
+    
+    # Validate start_x
+    if not isinstance(input_data['start_x'], (int, float)):
+        raise ValueError("start_x must be a number.")
+    
+    # Validate regions
+    regions = input_data['regions']
+    if not regions or not isinstance(regions, list):
+        raise ValueError("regions must be a non-empty list.")
+    
+    for region in regions:
+        # Validate each region
+        if not isinstance(region, dict):
+            raise ValueError("Each region must be a dictionary.")
         
-        # Used to track indices of given voxels list
-        index_set = set()
-        for voxel in voxels:
-            if not all(k in voxel for k in ("index", "start_position", "end_position", "scattering_cross_section", "positions")):
-                raise ValueError("Each voxel must contain index, start_position, end_position, scattering_cross_section, and positions.")
-            
-            if not isinstance(voxel['index'], int) or voxel['index'] < 0:
-                raise ValueError(f"Voxel index must be a non-negative integer. Found: {voxel['index']}")
-            
-            if voxel['index'] in index_set:
-                raise ValueError(f"Duplicate voxel index found: {voxel['index']}")
-            
-            index_set.add(voxel['index'])
-            
-            if not (isinstance(voxel['start_position'], (int, float)) and isinstance(voxel['end_position'], (int, float)) and voxel['start_position'] < voxel['end_position']):
-                raise ValueError(f"Voxel start_position and end_position must be numbers with start_position < end_position. Found: start={voxel['start_position']}, end={voxel['end_position']}")
-            
-            if not isinstance(voxel['scattering_cross_section'], (int, float)) or voxel['scattering_cross_section'] < 0:
-                raise ValueError(f"Scattering cross-section must be a non-negative number. Found: {voxel['scattering_cross_section']}")
-            
-            if not isinstance(voxel['positions'], list) or not all(isinstance(pos, (int, float)) for pos in voxel['positions']):
-                raise ValueError("Voxel positions must be a list of numbers.")
-            
-        expected_indices = set(range(len(voxels)))
-        if not index_set == expected_indices:
-            raise ValueError(f"Voxel indices are not as expected. Expected: {list(expected_indices)}, Found: {list(index_set)}")
+        required_keys = ['name', 'width', 'num_voxels', 'positions_per_voxel',
+                         'position_location', 'scattering_cross_section']
+        for key in required_keys:
+            if key not in region:
+                raise ValueError(f"Region is missing required key: {key}")
         
+        if not isinstance(region['name'], str):
+            raise ValueError("Region name must be a string.")
         
-        if 'source_voxel_index' not in input_data or not isinstance(input_data['source_voxel_index'], int):
-            raise ValueError("Input must contain a source_voxel_index of type int.")
+        if not isinstance(region['width'], (int, float)) or region['width'] <= 0:
+            raise ValueError("Region width must be a positive number.")
         
-        source_voxel_index = input_data['source_voxel_index']
-        if not(0 <= source_voxel_index < len(voxels)):
-            raise ValueError(f"Source voxel index {source_voxel_index} is out of bounds for the given number of voxels ({len(voxels)}).")
+        if not isinstance(region['num_voxels'], int) or region['num_voxels'] <= 0:
+            raise ValueError("Number of voxels must be a positive integer.")
         
-        logging.info("Input data validation passed")
-    except ValueError as e:
-        logging.error(f"Input validation failed: {e}")
-        raise e
+        if not isinstance(region['positions_per_voxel'], int) or region['positions_per_voxel'] <= 0:
+            raise ValueError("Positions per voxel must be a positive integer.")
+        
+        if region['position_location'] not in ['evenly-spaced', 'random']:
+            raise ValueError("Position location must be 'evenly-spaced' or 'random'.")
+        
+        if not isinstance(region['scattering_cross_section'], (int, float)) or region['scattering_cross_section'] <= 0:
+            raise ValueError("Scattering cross-section must be a positive number.")
+    
+    # Validate source
+    source = input_data['source']
+    if not source or not isinstance(source, dict):
+        raise ValueError("source must be a dictionary.")
+    
+    required_keys = ['voxel_index', 'strength']
+    for key in required_keys:
+        if key not in source:
+            raise ValueError(f"Source is missing required key: {key}")
+    
+    if not isinstance(source['voxel_index'], int) or source['voxel_index'] < 0:
+        raise ValueError("Source voxel index must be a non-negative integer.")
+    
+    if not isinstance(source['strength'], (int, float)) or source['strength'] <= 0:
+        raise ValueError("Source strength must be a positive number.")
+    
+    logging.info("Input data validation passed")
 
 def write_output(data:np.ndarray, file_path:str="results.csv"):
     """
@@ -409,13 +397,17 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 def main():
-    setup_logging(logging.INFO)
+    setup_logging(logging.DEBUG)
     logging.debug("Main function started")
+    
     args = parse_arguments()
     input_file_path = args.input_file
+    
     input_data = read_input(input_file_path)
     validate_input(input_data)
-    phi = perform_calculation(input_data)
+    
+    phi = perform_calculation(input_data["start_x"], input_data["regions"], input_data["source"])
+    
     write_output(phi)
 
 if __name__ == "__main__":

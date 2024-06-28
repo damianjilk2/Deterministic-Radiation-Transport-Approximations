@@ -1,53 +1,33 @@
 {
-    "voxels": [
+    "start_x": 0.0,
+    "regions": [
         {
-            "index": 0,
-            "start_position": 0.0,
-            "end_position": 2.0,
-            "scattering_cross_section": 0.2,
-            "positions": [
-                0.0,
-                0.1,
-                0.4
-            ]
+            "name": "Region1",
+            "width": 2.0,
+            "num_voxels": 1,
+            "positions_per_voxel": 2,
+            "position_location": "evenly-spaced",
+            "scattering_cross_section": 0.3
         },
         {
-            "index": 1,
-            "start_position": 2.0,
-            "end_position": 4.0,
-            "scattering_cross_section": 0.1,
-            "positions": [
-                2.2,
-                3.6
-            ]
+            "name": "Region2",
+            "width": 3.0,
+            "num_voxels": 2,
+            "positions_per_voxel": 1,
+            "position_location": "random",
+            "scattering_cross_section": 0.2
         },
         {
-            "index": 2,
-            "start_position": 4.0,
-            "end_position": 6.0,
-            "scattering_cross_section": 0.2,
-            "positions": [
-                4.0
-            ]
-        },
-        {
-            "index": 3,
-            "start_position": 6.0,
-            "end_position": 8.0,
-            "scattering_cross_section": 0.1,
-            "positions": [
-                6.0
-            ]
-        },
-        {
-            "index": 4,
-            "start_position": 8.0,
-            "end_position": 10.0,
-            "scattering_cross_section": 0.3,
-            "positions": [
-                8.0
-            ]
+            "name": "Region3",
+            "width": 5.0,
+            "num_voxels": 3,
+            "positions_per_voxel": 1,
+            "position_location": "evenly-spaced",
+            "scattering_cross_section": 0.1
         }
     ],
-    "source_voxel_index": 2
+    "source": {
+        "voxel_index": 3,
+        "strength": 1.0
+    }
 }
