@@ -149,7 +149,7 @@ def construct_transition_matrix(voxels:list[Voxel]) -> np.ndarray:
             voxel_j = voxels[j]
             num_position_pairs = voxel_i.number_of_positions * voxel_j.number_of_positions
             
-            # NOTE: j is always smaller than i. Using indexing, sublist of voxels to consider is voxels[j:i+1]
+            # NOTE: j is always smaller than i. Using indexing, sublist of voxels to consider is voxels[j:i+1].
             streaming_sum = sum(calculate_K_trans(pos_i, pos_j, voxels[j:i+1])
                                 for pos_i in voxel_i.positions
                                 for pos_j in voxel_j.positions)
