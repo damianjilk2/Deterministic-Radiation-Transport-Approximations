@@ -83,7 +83,8 @@ def calculate_K_trans(start_position:float, end_position:float, voxels:list[Voxe
     Returns:
     - float: Streaming operator. TODO: better understand what this value represents.
     """
-    if end_position - start_position == 0:
+    if start_position == end_position:
+        # Zero distance case.
         return 1.0  #TODO revisit this assumption after better understanding the streaming operator.
     
     logging.debug(f"Calculating K_trans from {start_position} to {end_position}")
@@ -95,22 +96,22 @@ def calculate_K_trans(start_position:float, end_position:float, voxels:list[Voxe
     start_voxel = voxels[0]
     end_voxel = voxels[-1]
     
-    # TODO: assume equal voxel size for now. Future implementations will have variable voxel sizes.
-    voxel_size = start_voxel.voxel_size
-    sigma_s = [voxel.scattering_cross_section for voxel in voxels]
-    
     tau = 0.0
     
     if start_voxel.index == end_voxel.index:
+        # Same voxel calculation.
         distance = end_position - start_position
-        assert len(sigma_s) == 1
         tau = start_voxel.scattering_cross_section * distance
         logging.debug(f"Same voxel: tau = {tau}")
     else:
-        left_distance = (start_voxel.index + 1) * voxel_size - start_position
-        right_distance = end_position - (end_voxel.index*voxel_size)
+        # Different voxel calculation.
+        left_distance = start_voxel.end_position - start_position
+        right_distance = end_position - end_voxel.start_position
+        center_distance =  [voxel.end_position - voxel.start_position for voxel in voxels[1:-1]]
+
+        path = [left_distance] + center_distance + [right_distance]
         
-        path = [left_distance] + [voxel_size] * (end_voxel.index - start_voxel.index - 1) + [right_distance]
+        sigma_s = [voxel.scattering_cross_section for voxel in voxels]
         tau = np.dot(sigma_s, path)
         logging.debug(f"Different voxels: tau = {tau}")
     
