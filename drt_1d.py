@@ -1,5 +1,5 @@
 """
-Title: Deterministic Radiation Trasport - 1-D Toy Problem with Voxelized Geometry
+Title: Deterministic Radiation Transport - 1-D Toy Problem with Voxelized Geometry
 Author: Damian Jilk
 """
 
@@ -8,8 +8,45 @@ import json
 import csv
 import logging
 import argparse
+import itertools
+import scipy.special as sc
+import random
 
-def construct_source_term(num_voxels:int, source_voxel_index:int, source_strength:float=1):
+class Voxel:
+    def __init__(self, index:int, start_position:float, end_position:float, scattering_cross_section:float, positions:list):
+        """
+        Represents a voxel in the 1-D space.
+
+        Parameters:
+        - index (int): Index of the voxel.
+        - start_position (float): Starting position of the voxel.
+        - end_position (float): Ending position of the voxel.
+        - scattering_cross_section (float): Scattering cross-section of the voxel.
+        """
+        self.index = index
+        self.start_position = start_position
+        self.end_position = end_position
+        self.scattering_cross_section = scattering_cross_section
+        self.positions = positions
+        logging.debug(
+            f"Voxel created with index {self.index}, "
+            f"start_position {self.start_position}, "
+            f"end_position {self.end_position}, "
+            f"scattering_cross_section {self.scattering_cross_section}, "
+            f"positions {self.positions}"
+        )
+        
+    @property
+    def voxel_size(self) -> float:
+        """Calculate and return the size of the voxel."""
+        return self.end_position - self.start_position
+    
+    @property
+    def number_of_positions(self) -> int:
+        """Calculate and return the number of positions."""
+        return len(self.positions)
+
+def construct_source_term(num_voxels:int, source_voxel_index:int, source_strength:float=1.) -> np.ndarray:
     """
     Constructs the source term vector. 
     
@@ -25,104 +62,132 @@ def construct_source_term(num_voxels:int, source_voxel_index:int, source_strengt
     """
     logging.debug(f"Constructing source term with {num_voxels} voxels, source at index {source_voxel_index}, strength {source_strength}")
     
-    if not isinstance(num_voxels, int) or num_voxels <= 0:
-        raise ValueError("Number of voxels must be a positive integer.")
-    if not isinstance(source_voxel_index, int) or source_voxel_index < 0 or source_voxel_index >= num_voxels:
-        raise IndexError("Source voxel index must be within the range of voxels.")
-    
     s = np.zeros(num_voxels)
     s[source_voxel_index] = source_strength
     logging.debug(f"Constructed source vector: {s}")
     return s
 
-def calculate_K_trans(ri:int, rj:int, voxel_size:float, sigma_s:np.ndarray):
+def calculate_K_trans(start_position:float, end_position:float, voxels:list[Voxel]) -> float:
     """
     Calculate the streaming operator. 
     
     Used by the construct_transition_matrix function to build the K_trans matrix.
-
-    Current method calculates tau by summing the cross-sections of the voxels from the start index to the end index, 
-    always summing from the left edge of the starting voxel to the left edge of the ending voxel, regardless of the direction of transport.
-    
-    The calculation assumes equal voxel spacing.
     
     Based on principles from the book by Lewis and Miller (1984). Equations derived using Chapter 5. 
 
     Parameters:
-    - ri (int): Index of the starting voxel.
-    - rj (int): Index of the ending voxel.
-    - voxel_size (float): Size of each voxel.
-    - sigma_s (numpy.ndarray): Vector of scattering cross-sections.
+    - start_position (float): Starting point within a voxelized space.
+    - end_position (float): Ending point within a voxelized space.
+    - voxels (list[Voxel]): List of Voxel objects between the start and end positions.
 
     Returns:
-    - float: Streaming operator. This represents the probability that a particle born at the left side of ri streams to the left side of rj without interacting.
-    
-    TODO: Update this function to accurately calculate tau for two arbitrary points within the voxelized space, considering the actual path of transport.
+    - float: Streaming operator. TODO: better understand what this value represents.
     """
-    logging.debug(f"Calculating K_trans from voxel {ri} to voxel {rj} with voxel size {voxel_size}")
+    if start_position == end_position:
+        # Zero distance case.
+        return 1.0  #TODO revisit this assumption after better understanding the streaming operator.
     
-    if voxel_size <= 0:
-        raise ValueError("Voxel size must be positive and non-zero.")
-    if ri < 0 or ri >= len(sigma_s) or rj < 0 or rj >= len(sigma_s):
-        raise ValueError("Voxel indices must be non-negative and within the range of the sigma_s_matrix.")
+    logging.debug(f"Calculating K_trans from {start_position} to {end_position}")
     
-    min_index = min(ri, rj)
-    max_index = max(ri, rj)
-    distance = abs(ri - rj) * voxel_size
-    tau = np.sum(sigma_s[min_index:max_index]) * voxel_size
-    streaming_operator = np.exp(-tau) / (4 * np.pi * distance**2)
-    logging.debug(f"Calculated K_trans: {streaming_operator}")
+    # Since transport is symmetric, it does not matter which direction is traveled. Let's set it to travel left to right.
+    if start_position > end_position:
+        start_position, end_position = end_position, start_position
+    
+    start_voxel = voxels[0]
+    end_voxel = voxels[-1]
+    
+    tau = 0.0
+    
+    if start_voxel.index == end_voxel.index:
+        # Same voxel calculation.
+        distance = end_position - start_position
+        tau = start_voxel.scattering_cross_section * distance
+        logging.debug(f"Same voxel: tau = {tau}")
+    else:
+        # Different voxel calculation.
+        left_distance = start_voxel.end_position - start_position
+        right_distance = end_position - end_voxel.start_position
+        center_distance =  [voxel.end_position - voxel.start_position for voxel in voxels[1:-1]]
+
+        path = [left_distance] + center_distance + [right_distance]
+        
+        sigma_s = [voxel.scattering_cross_section for voxel in voxels]
+        tau = np.dot(sigma_s, path)
+        logging.debug(f"Different voxels: tau = {tau}")
+    
+    streaming_operator = (1/2) * sc.exp1(tau)
+    logging.debug(f"Calculated streaming operator: {streaming_operator}")
     return streaming_operator
 
-def construct_transition_matrix(num_voxels:int, voxel_size:float, sigma_s:np.ndarray):
+def construct_transition_matrix(voxels:list[Voxel]) -> np.ndarray:
     """
     Construct the transition matrix.
 
     Parameters:
-    - num_voxels (int): Number of spatial elements (voxels).
-    - voxel_size (float): Size of each voxel.
-    - sigma_s (numpy.ndarray): Vector of scattering cross-sections.
+    - voxels (list[Voxel]): List of Voxel objects.
 
     Returns:
     - numpy.ndarray: Transition matrix.
     """
-    logging.debug(f"Constructing transition matrix with {num_voxels} voxels and voxel size {voxel_size}")
-  
-    if num_voxels <= 0:
-        raise ValueError("Number of voxels must be positive and non-zero.")
-    if voxel_size <= 0:
-        raise ValueError("Voxel size must be positive and non-zero.")
-        
+    logging.debug("Constructing transition matrix")
+    
+    num_voxels = len(voxels)
     K_trans = np.zeros((num_voxels, num_voxels))
-    for i in range(num_voxels):
-        # Set diagonal values to one 
-        K_trans[i,i] = 1
+    
+    for i, voxel_i in enumerate(voxels):
+        if voxel_i.number_of_positions == 1:
+            K_trans[i,i] = 1                    # TODO need to revisit this assumption
+            logging.debug(f"Voxel {i} has a single position; K_trans[{i},{i}] set to 1")
+        else:
+            position_pairs = list(itertools.combinations(voxel_i.positions, 2))
+            num_position_pairs = 2 * len(position_pairs)
+            
+            streaming_sum = sum(2 * calculate_K_trans(pos_a, pos_b, [voxel_i]) for pos_a, pos_b in position_pairs)
+            K_trans[i,i] = streaming_sum / num_position_pairs
+            logging.debug(f"K_trans[{i},{i}] calculated as {K_trans[i, i]}")
+
         for j in range(i):
-            K_trans[i, j] = calculate_K_trans(i, j, voxel_size, sigma_s)
-            # The transition matrix is symmetric
+            voxel_j = voxels[j]
+            num_position_pairs = voxel_i.number_of_positions * voxel_j.number_of_positions
+            
+            # NOTE: j is always smaller than i. Using indexing, sublist of voxels to consider is voxels[j:i+1].
+            streaming_sum = sum(calculate_K_trans(pos_i, pos_j, voxels[j:i+1])
+                                for pos_i in voxel_i.positions
+                                for pos_j in voxel_j.positions)
+            
+            K_trans[i,j] = streaming_sum  / num_position_pairs
             K_trans[j,i] = K_trans[i,j]
-    logging.debug(f"Constructed transition matrix: {K_trans}")
+            logging.debug(f"K_trans[{i},{j}] and K_trans[{j},{i}] calculated as {K_trans[i, j]}")
+
+    logging.info(f"Constructed transition matrix:\n{K_trans}")
     return K_trans
 
-def calculate_neutron_flux(K_trans:np.ndarray, sigma_s:np.ndarray, s:np.ndarray):
+def calculate_neutron_flux(K_trans:np.ndarray, sigma_s:list, s:np.ndarray) -> np.ndarray:
     """
     Calculate the neutron flux vector.
 
     Parameters:
     - K_trans (numpy.ndarray): Transition matrix.
-    - sigma_s (numpy.ndarray): Vector of scattering cross-sections.
+    - sigma_s (list): List of scattering cross-sections.
     - s (numpy.ndarray): Source term vector.
 
     Returns:
     - numpy.ndarray: Neutron flux vector.
     """
-    logging.debug("Calculating neutron flux vector")
-    sigma_s_matrix = np.diag(sigma_s) # Converts sigma_s vector to a diagonal matrix
-    phi = np.dot(np.linalg.inv(np.eye(len(K_trans)) - np.dot(K_trans, sigma_s_matrix)), np.dot(K_trans, s))
-    logging.debug(f"Calculated neutron flux vector: {phi}")
-    return phi
+    logging.debug("Calculating neutron flux")
+    
+    sigma_s_matrix = np.diag(sigma_s)
+    
+    try:
+        inverse_matrix = np.linalg.inv(np.eye(len(K_trans)) - np.dot(K_trans, sigma_s_matrix))
+        phi = np.dot(inverse_matrix, np.dot(K_trans, s))
+        logging.info(f"Calculated neutron flux: {phi}")
+        return phi
+    except np.linalg.LinAlgError as e:
+        logging.error(f"Linear algebra error during neutron flux calculation: {e}")
+        raise e
 
-def read_input(file_path:str):
+def read_input(file_path:str) -> dict:
     """
     Reads input data from a specified JSON file.
 
@@ -136,7 +201,7 @@ def read_input(file_path:str):
     try:
         with open(file_path, "r") as json_file:
             data = json.load(json_file)
-        logging.debug(f"Input data: {data}")
+        logging.info(f"Input data read successfully: {data}")
     except FileNotFoundError as e:
         logging.error(f"File {file_path} not found: {e}")
         raise e
@@ -145,35 +210,139 @@ def read_input(file_path:str):
         raise e
     return data
 
-def perform_calculation(input_data:dict):
+def perform_calculation(start_x:float, regions_data:list, source_data:dict) -> np.ndarray:
     """
     Performs the main calculation for the neutron flux based on input parameters.
 
     Parameters:
-    - input_data (dict): A dictionary containing input parameters including spatial boundaries, voxel count, source index, and scattering cross-sections.
+    - start_x (float): Starting x-value for the calculation.
+    - regions_data (list): List of dictionaries containing region parameters consisting of name, width, num_voxels, positions_per_voxel, position_location, and scattering_cross_section.
+    - source_data (dict): Dictionary containing source parameters consisting of voxel_index and strength. 
 
     Returns:
     - numpy.ndarray: The neutron flux vector calculated from the input data.
     """
-    logging.debug(f"Performing calculation with input data: {input_data}")
-    x_min = input_data.get("minimum_x")
-    x_max = input_data.get("maximum_x")
-    num_voxels = input_data.get("number_of_voxels")
-    source_voxel_index = input_data.get("source_voxel_index")
-    sigma_s_values = input_data.get("scattering_cross_section")
-
-    voxel_size = (x_max - x_min) / num_voxels
+    logging.debug(f"Performing calculation with input data: start_x={start_x}, regions_data={regions_data}, source_data={source_data}")
     
-    s = construct_source_term(num_voxels, source_voxel_index)
-    K_trans = construct_transition_matrix(num_voxels, voxel_size, sigma_s_values)
+    voxels:list[Voxel] = []
+    total_num_voxels = 0
+    
+    # Read through the regions_data and create Voxel objects accordingly. 
+    for index, region_data in enumerate(regions_data):
+        width = region_data['width']
+        num_voxels = region_data['num_voxels']
+        positions_per_voxel = region_data['positions_per_voxel']
+        position_location = region_data['position_location']
+        scattering_cross_section = region_data['scattering_cross_section']
+
+        total_num_voxels += num_voxels
+        
+        voxel_width = width / num_voxels
+        for voxel_index in range(num_voxels):
+            start_position = start_x + voxel_index*voxel_width
+            end_position = start_position + voxel_width
+            positions = []
+
+            if position_location == 'evenly-spaced':
+                # Evenly spaced between the two end points, excluding the end points themselves.
+                positions = np.linspace(start_position, end_position, positions_per_voxel + 2)[1:-1].tolist()
+            elif position_location == 'random':
+                positions = sorted([random.uniform(start_position, end_position) for _ in range(positions_per_voxel)])
+
+            voxel = Voxel(
+                index = len(voxels),
+                start_position = start_position,
+                end_position = end_position,
+                scattering_cross_section = scattering_cross_section,
+                positions = positions
+            )
+            voxels.append(voxel)
+            
+        # Update start_x to be the left side of the next region.
+        start_x += width
+    
+    source_voxel_index = source_data['voxel_index']
+    source_strength = source_data['strength']
+    
+    s = construct_source_term(total_num_voxels, source_voxel_index, source_strength)
+    K_trans = construct_transition_matrix(voxels)
+    
+    sigma_s_values = [voxel.scattering_cross_section for voxel in voxels]
+    
     phi = calculate_neutron_flux(K_trans, sigma_s_values, s)
     
-    logging.info(f"Scattering Cross-section Vector (sigma_s):\n{sigma_s_values}")
-    logging.info(f"Source Vector (s):\n{s}")
-    logging.info(f"Transition Matrix (K_trans):\n{K_trans}")
-    logging.info(f"Neutron Flux Vector (phi):\n{phi}")
-    
     return phi
+
+def validate_input(input_data:dict) -> None:
+    """
+    Validates the overall input data structure and key parameters.
+    
+    Parameters:
+    - input_data (dict): The input data to be validated.
+
+    Returns:
+    - None
+
+    Raises:
+    - ValueError: If any validation checks fail.
+    """
+    logging.debug("Validating input data")
+    
+    # Validate start_x
+    if not isinstance(input_data['start_x'], (int, float)):
+        raise ValueError("start_x must be a number.")
+    
+    # Validate regions
+    regions = input_data['regions']
+    if not regions or not isinstance(regions, list):
+        raise ValueError("regions must be a non-empty list.")
+    
+    for region in regions:
+        # Validate each region
+        if not isinstance(region, dict):
+            raise ValueError("Each region must be a dictionary.")
+        
+        required_keys = ['name', 'width', 'num_voxels', 'positions_per_voxel',
+                         'position_location', 'scattering_cross_section']
+        missing_keys = set(required_keys) - set(region.keys())
+        if missing_keys:
+            raise ValueError(f"Region is missing required key(s): {missing_keys}")
+        
+        if not isinstance(region['name'], str):
+            raise ValueError("Region name must be a string.")
+        
+        if not isinstance(region['width'], (int, float)) or region['width'] <= 0:
+            raise ValueError("Region width must be a positive number.")
+        
+        if not isinstance(region['num_voxels'], int) or region['num_voxels'] <= 0:
+            raise ValueError("Number of voxels must be a positive integer.")
+        
+        if not isinstance(region['positions_per_voxel'], int) or region['positions_per_voxel'] <= 0:
+            raise ValueError("Positions per voxel must be a positive integer.")
+        
+        if region['position_location'] not in ['evenly-spaced', 'random']:
+            raise ValueError("Position location must be 'evenly-spaced' or 'random'.")
+        
+        if not isinstance(region['scattering_cross_section'], (int, float)) or region['scattering_cross_section'] <= 0:
+            raise ValueError("Scattering cross-section must be a positive number.")
+    
+    # Validate source
+    source = input_data['source']
+    if not source or not isinstance(source, dict):
+        raise ValueError("source must be a dictionary.")
+    
+    required_keys = ['voxel_index', 'strength']
+    missing_keys = set(required_keys) - set(source.keys())
+    if missing_keys:
+        raise ValueError(f"Source is missing required key(s): {missing_keys}")
+    
+    if not isinstance(source['voxel_index'], int) or source['voxel_index'] < 0:
+        raise ValueError("Source voxel index must be a non-negative integer.")
+    
+    if not isinstance(source['strength'], (int, float)) or source['strength'] <= 0:
+        raise ValueError("Source strength must be a positive number.")
+    
+    logging.info("Input data validation passed")
 
 def write_output(data:np.ndarray, file_path:str="results.csv"):
     """
@@ -181,7 +350,7 @@ def write_output(data:np.ndarray, file_path:str="results.csv"):
 
     Parameters:
     - data (numpy.ndarray): The neutron flux vector to be written to the file.
-    file_path (str, optional): The path to the CSV file where results will be saved, default is "results.csv".
+    - file_path (str, optional): The path to the CSV file where results will be saved, default is "results.csv".
 
     Returns:
     - None
@@ -215,14 +384,14 @@ def setup_logging(level:int = logging.INFO):
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-def parse_arguments():
+def parse_arguments() -> argparse.Namespace:
     """
     Parses command-line arguments.
     
     Returns:
     - argparse.Namespace: A namespace containing the parsed arguments.
     """
-    parser = argparse.ArgumentParser(description='Deterministic Radiation Transport Calculation.')
+    parser = argparse.ArgumentParser(description='Run deterministic radiation transport calculations in a 1-D voxelized geometry.')
     parser.add_argument(
         '--input_file',
         type=str,
@@ -232,12 +401,17 @@ def parse_arguments():
     return parser.parse_args()
 
 def main():
-    setup_logging()
+    setup_logging(logging.DEBUG)
     logging.debug("Main function started")
+    
     args = parse_arguments()
     input_file_path = args.input_file
+    
     input_data = read_input(input_file_path)
-    phi = perform_calculation(input_data)
+    validate_input(input_data)
+    
+    phi = perform_calculation(input_data["start_x"], input_data["regions"], input_data["source"])
+    
     write_output(phi)
 
 if __name__ == "__main__":

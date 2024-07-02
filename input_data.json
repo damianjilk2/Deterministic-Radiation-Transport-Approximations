@@ -1,15 +1,33 @@
 {
-    "minimum_x": -10.0,
-    "maximum_x": 10.0,
-    "number_of_voxels": 7,
-    "source_voxel_index": 2,
-    "scattering_cross_section": [
-        0.2,
-        0.1,
-        0.2,
-        0.1,
-        0.3,
-        0.2,
-        0.4
-    ]
+    "start_x": 0.0,
+    "regions": [
+        {
+            "name": "Region1",
+            "width": 2.0,
+            "num_voxels": 1,
+            "positions_per_voxel": 2,
+            "position_location": "evenly-spaced",
+            "scattering_cross_section": 0.3
+        },
+        {
+            "name": "Region2",
+            "width": 3.0,
+            "num_voxels": 2,
+            "positions_per_voxel": 1,
+            "position_location": "random",
+            "scattering_cross_section": 0.2
+        },
+        {
+            "name": "Region3",
+            "width": 5.0,
+            "num_voxels": 3,
+            "positions_per_voxel": 1,
+            "position_location": "evenly-spaced",
+            "scattering_cross_section": 0.1
+        }
+    ],
+    "source": {
+        "voxel_index": 3,
+        "strength": 1.0
+    }
 }
