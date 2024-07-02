@@ -239,7 +239,7 @@ def perform_calculation(start_x:float, regions_data:list, source_data:dict) -> n
         
         voxel_width = width / num_voxels
         for voxel_index in range(num_voxels):
-            start_position = start_x + index*width + voxel_index*voxel_width
+            start_position = start_x + voxel_index*voxel_width
             end_position = start_position + voxel_width
             positions = []
 
@@ -257,6 +257,9 @@ def perform_calculation(start_x:float, regions_data:list, source_data:dict) -> n
                 positions = positions
             )
             voxels.append(voxel)
+            
+        # Update start_x to be the left side of the next region.
+        start_x += width
     
     source_voxel_index = source_data['voxel_index']
     source_strength = source_data['strength']
@@ -301,9 +304,9 @@ def validate_input(input_data:dict) -> None:
         
         required_keys = ['name', 'width', 'num_voxels', 'positions_per_voxel',
                          'position_location', 'scattering_cross_section']
-        for key in required_keys:
-            if key not in region:
-                raise ValueError(f"Region is missing required key: {key}")
+        missing_keys = set(required_keys) - set(region.keys())
+        if missing_keys:
+            raise ValueError(f"Region is missing required key(s): {missing_keys}")
         
         if not isinstance(region['name'], str):
             raise ValueError("Region name must be a string.")
@@ -329,9 +332,9 @@ def validate_input(input_data:dict) -> None:
         raise ValueError("source must be a dictionary.")
     
     required_keys = ['voxel_index', 'strength']
-    for key in required_keys:
-        if key not in source:
-            raise ValueError(f"Source is missing required key: {key}")
+    missing_keys = set(required_keys) - set(source.keys())
+    if missing_keys:
+        raise ValueError(f"Source is missing required key(s): {missing_keys}")
     
     if not isinstance(source['voxel_index'], int) or source['voxel_index'] < 0:
         raise ValueError("Source voxel index must be a non-negative integer.")
