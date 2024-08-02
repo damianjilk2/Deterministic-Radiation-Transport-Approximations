@@ -1,140 +1,108 @@
-from drt_1d import (
-    construct_source_term,
-    calculate_K_trans,
-    construct_transition_matrix,
-    calculate_neutron_flux,
-    read_input,
-    validate_input,
-    Voxel
-)
+from drt_1d import Region, Domain, read_input, perform_calculation
 import numpy as np
 import scipy.special as sc
 import pytest
-import copy
 
-def test_construct_source_term():
+def test_region_properties():
     """
-    Test the construction of the source term vector.
+    Test properties and methods of the Region class.
     """
-    # Normal case
-    s = construct_source_term(6, 2)
-    expected_s = np.zeros(6)
-    expected_s[2] = 1
-    np.testing.assert_array_equal(s, expected_s)
-    
-    # Edge case: Zero source strength
-    s_zero_strength = construct_source_term(6, 2, 0)
-    expected_s_zero_strength = np.zeros(6)
-    np.testing.assert_array_equal(s_zero_strength, expected_s_zero_strength)
-    
-def test_calculate_K_trans():
-    """
-    Test calculation of transition probability between voxel centers.
-    """
-    voxels = [
-        Voxel(0, 0.0, 2.0, 0.2, [0.0,0.1,0.4]),
-        Voxel(1, 2.0, 4.0, 0.1, [2.2,3.6]),
-        Voxel(2, 4.0, 6.0, 0.2, [4.0]),
-        Voxel(3, 6.0, 8.0, 0.1, [6.0]),
-        Voxel(4, 8.0, 10.0, 0.3, [8.0])
-    ]
-    # Normal case going right
-    K = calculate_K_trans(0.0, 2.2, voxels[0:2])
-    expected_K = (1/2)*sc.exp1((2*0.2)+(0.2*0.1))
-    np.testing.assert_almost_equal(K, expected_K, decimal=5)
-    
-    # Normal case going left
-    K = calculate_K_trans(2.2, 0.0, voxels[0:2])
-    np.testing.assert_almost_equal(K, expected_K, decimal=5)
+    region = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
+    assert region.voxel_width == 2.0
+    positions = region.generate_positions(start_x=0.0)
+    assert len(positions) == 15  # 5 voxels, 3 positions each
 
-def test_construct_transition_matrix():
+def test_domain_initialization():
+    """
+    Test initialization and properties of the Domain class.
+    """
+    region1 = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
+    region2 = Region(width=20.0, num_voxels=10, scattering_cross_section=0.1, positions_per_voxel=2, position_location_str='random')
+    domain = Domain(start_x=0.0, regions=[region1, region2])
+    
+    assert domain.num_voxels == 15
+    assert len(domain.positions) == 35  # 5*3 + 10*2
+
+def test_source_term():
+    """
+    Test construction of the source term vector.
+    """
+    region1 = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
+    region2 = Region(width=20.0, num_voxels=10, scattering_cross_section=0.1, positions_per_voxel=2, position_location_str='random')
+    domain = Domain(start_x=0.0, regions=[region1, region2])
+    source_term = domain.construct_source_term(source_voxel_index=2, source_strength=1.0)
+    assert source_term[2] == 1.0
+    assert np.sum(source_term) == 1.0
+
+def test_optical_thickness():
+    """
+    Test computation of optical thickness.
+    """
+    region1 = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
+    region2 = Region(width=20.0, num_voxels=10, scattering_cross_section=0.1, positions_per_voxel=2, position_location_str='random')
+    domain = Domain(start_x=0.0, regions=[region1, region2])
+    
+    tau = domain.compute_optical_thickness(x1=1.0, x2=15.0)
+    expected_tau = (0.2 * 9.0) + (0.1 * 5.0)  # part of region1 and part of region2
+    assert np.isclose(tau, expected_tau)
+
+def test_streaming_operator():
+    """
+    Test computation of streaming operator.
+    """
+    region1 = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
+    region2 = Region(width=20.0, num_voxels=10, scattering_cross_section=0.1, positions_per_voxel=2, position_location_str='random')
+    domain = Domain(start_x=0.0, regions=[region1, region2])
+    
+    operator = domain.compute_streaming_operator(start_position=1.0, end_position=15.0)
+    tau = (0.2 * 9.0) + (0.1 * 5.0)
+    expected_operator = (1/2) * sc.exp1(tau)
+    assert np.isclose(operator, expected_operator)
+
+def test_transition_matrix():
     """
     Test construction of the transition matrix.
     """
-    voxels = [
-        Voxel(0, 0.0, 2.0, 0.2, [0.0,0.1,0.4]),
-        Voxel(1, 2.0, 4.0, 0.1, [2.2,3.6]),
-        Voxel(2, 4.0, 6.0, 0.2, [4.0]),
-        Voxel(3, 6.0, 8.0, 0.1, [6.0]),
-        Voxel(4, 8.0, 10.0, 0.3, [8.0])
-    ]
-    # Normal case
-    K_trans = construct_transition_matrix(voxels)
-    assert K_trans.shape == (5, 5)
+    region1 = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
+    region2 = Region(width=20.0, num_voxels=10, scattering_cross_section=0.1, positions_per_voxel=2, position_location_str='random')
+    domain = Domain(start_x=0.0, regions=[region1, region2])
+    
+    K_trans = domain.construct_transition_matrix()
+    assert K_trans.shape == (15, 15)
 
-def test_calculate_neutron_flux():
+def test_neutron_flux():
     """
     Test calculation of the neutron flux vector.
     """
-    voxels = [
-        Voxel(0, 0.0, 2.0, 0.2, [0.0,0.1,0.4]),
-        Voxel(1, 2.0, 4.0, 0.1, [2.2,3.6]),
-        Voxel(2, 4.0, 6.0, 0.2, [4.0]),
-        Voxel(3, 6.0, 8.0, 0.1, [6.0]),
-        Voxel(4, 8.0, 10.0, 0.3, [8.0])
-    ]
-    # Normal case
-    K_trans = construct_transition_matrix(voxels)
-    s = construct_source_term(5, 2)
-    sigma_s = [0.2, 0.1, 0.2, 0.1, 0.3]
-    phi = calculate_neutron_flux(K_trans, sigma_s, s)
-    assert len(phi) == 5
+    region1 = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
+    region2 = Region(width=20.0, num_voxels=10, scattering_cross_section=0.1, positions_per_voxel=2, position_location_str='random')
+    domain = Domain(start_x=0.0, regions=[region1, region2])
     
-    # Edge case: Zero source term
-    s_zero = np.zeros(5)
-    phi_zero = calculate_neutron_flux(K_trans, sigma_s, s_zero)
-    assert np.all(phi_zero == 0)
+    phi = domain.compute_neutron_flux(source_voxel_index=2, source_strength=1.0)
+    assert len(phi) == 15
 
 def test_read_input():
     """
-    Test reading input file
+    Test reading input data from a file.
     """
-    # Edge case: non-existent file
     with pytest.raises(FileNotFoundError):
-        read_input('nonexistent_file.txt')
+        read_input('nonexistent_file.json')
 
-def test_validate_input():
+def test_perform_calculation():
     """
-    Test the validate_input function.
+    Test the perform_calculation function.
     """
-    # Normal case
     input_data = {
         'start_x': 0.0,
         'regions': [
-            {'name': 'Region1', 'width': 2.0, 'num_voxels': 1, 'positions_per_voxel': 2,
-             'position_location': 'evenly-spaced', 'scattering_cross_section': 0.3},
-            {'name': 'Region2', 'width': 3.0, 'num_voxels': 2, 'positions_per_voxel': 1,
-             'position_location': 'random', 'scattering_cross_section': 0.2},
-            {'name': 'Region3', 'width': 5.0, 'num_voxels': 3, 'positions_per_voxel': 1,
-             'position_location': 'evenly-spaced', 'scattering_cross_section': 0.1}
+            {'width': 10.0, 'num_voxels': 5, 'positions_per_voxel': 3, 'position_location': 'evenly-spaced', 'scattering_cross_section': 0.2},
+            {'width': 20.0, 'num_voxels': 10, 'positions_per_voxel': 2, 'position_location': 'random', 'scattering_cross_section': 0.1}
         ],
-        'source': {'voxel_index': 3, 'strength': 1.0}
+        'source': {'voxel_index': 2, 'strength': 1.0}
     }
-    validate_input(input_data)
     
-    # Edge case: Non-list regions
-    with pytest.raises(ValueError):
-        validate_input({'start_x': 0.0, 'regions': {}, 'source': input_data['source']})
-    
-    # Edge case: Region missing required keys
-    with pytest.raises(ValueError):
-        validate_input({'start_x': 0.0, 'regions': [{'name': 'Region1', 'width': 2.0}], 'source': input_data['source']})
-    
-    # Edge case: Negative voxel index in source
-    with pytest.raises(ValueError):
-        input_data_error = copy.deepcopy(input_data)
-        input_data_error['source']['voxel_index'] = -1
-        validate_input(input_data_error)
-    
-    # Edge case: Non-numeric start_x
-    with pytest.raises(ValueError):
-        validate_input({'start_x': 'invalid', 'regions': input_data['regions'], 'source': input_data['source']})
-    
-    # Edge case: Non-numeric width in region
-    with pytest.raises(ValueError):
-        input_data_error = copy.deepcopy(input_data)
-        input_data_error['regions'][0]['width'] = 'invalid'
-        validate_input(input_data_error)
+    phi = perform_calculation(input_data['start_x'], input_data['regions'], input_data['source'])
+    assert len(phi) == 15
 
 if __name__ == "__main__":
     import pytest
