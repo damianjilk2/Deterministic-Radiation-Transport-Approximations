@@ -28,6 +28,7 @@ class Region:
         self.scattering_cross_section = scattering_cross_section
         self.positions_per_voxel = positions_per_voxel
         self.position_location_str = position_location_str
+        self.start_x = 0 # Initialize region start value.
         
     @property
     def voxel_width(self) -> float:
@@ -41,22 +42,19 @@ class Region:
     
     def generate_positions(self, start_x: float) -> np.ndarray:
         """
-        Generates positions within the region based on the specified strategy.
+        Generates positions within a single voxel based on the specified strategy.
 
         Parameters:
-        - start_x (float): Starting x-coordinate for the region.
+        - start_x (float): Starting x-coordinate for the voxel.
 
         Returns:
-        - np.ndarray: Array of positions within the region.
+        - np.ndarray: Array of positions within the voxel.
         """
-        positions = []
-        for voxel_index in range(self.num_voxels):
-            voxel_start = start_x + voxel_index * self.voxel_width
-            voxel_end = voxel_start + self.voxel_width
-            if self.position_location_str == 'evenly-spaced':
-                positions.extend(np.linspace(voxel_start, voxel_end, self.positions_per_voxel + 2)[1:-1])
-            elif self.position_location_str == 'random':
-                positions.extend(sorted(random.uniform(voxel_start, voxel_end) for _ in range(self.positions_per_voxel)))
+        voxel_end = start_x + self.voxel_width
+        if self.position_location_str == 'evenly-spaced':
+            positions = np.linspace(start_x, voxel_end, self.positions_per_voxel + 2)[1:-1]
+        elif self.position_location_str == 'random':
+            positions = sorted(random.uniform(start_x, voxel_end) for _ in range(self.positions_per_voxel))
         return np.array(positions)
 
 class Domain:
@@ -70,11 +68,11 @@ class Domain:
         """
         self.start_x = start_x
         self.regions = regions
-        self.boundaries = self._compute_boundaries()
         self.widths = np.array([region.width for region in regions])
         self.sigmas = np.array([region.scattering_cross_section for region in regions])
         self.num_voxels = sum(region.num_voxels for region in self.regions)
-        self.positions = self._generate_positions()
+        self.cumsum_voxels = np.cumsum([0] + [region.num_voxels for region in self.regions])
+        self._compute_boundaries()
         
     def _compute_boundaries(self) -> np.ndarray:
         """
@@ -85,24 +83,11 @@ class Domain:
         Returns:
         - np.ndarray: Array of boundary positions.
         """
-        return np.cumsum([self.start_x] + [region.width for region in self.regions])
-        
-    def _generate_positions(self) -> np.ndarray:
-        """
-        Generates all positions within the domain based on regions' configurations.
+        self.boundaries = np.cumsum([self.start_x] + [region.width for region in self.regions])
+        for start_x, region in zip(self.boundaries[:-1],self.regions):
+            region.start_x = start_x
 
-        Returns:
-        - np.ndarray: Array of all positions within the domain.
-        """
-        positions = []
-        start_x = self.start_x
-        for region in self.regions:
-            region_positions = region.generate_positions(start_x)
-            positions.extend(region_positions)
-            start_x += region.width
-        return np.array(positions)
-
-    def get_region_id(self, x:float) -> int:
+    def get_region_id_from_position(self, x:float) -> int:
         """
         Determines the region ID for a given x-coordinate.
         
@@ -115,25 +100,39 @@ class Domain:
         Returns:
         - int: Region ID containing the x-coordinate.
         """
-        return np.searchsorted(self.boundaries, x, side='right') - 1 
+        return np.searchsorted(self.boundaries, x, side='right') - 1
     
-    def get_voxel_id(self, x:float) -> int:
+    def get_region_from_voxel_index(self, voxel_index: int) -> int:
+        """
+        Determines the region ID for a given voxel index.
+
+        Parameters:
+        - voxel_index (int): Index of the voxel.
+
+        Returns:
+        - int: Region ID containing the voxel.
+        """
+        return np.searchsorted(self.cumsum_voxels, voxel_index, side='right') - 1
+    
+    def get_voxel_id(self, x: float) -> int:
         """
         Determines the voxel ID for a given x-coordinate.
 
         Note: an error is thrown when the given x-coordinate is out of bounds or on the right boundary.
-                
+
         Parameters:
         - x (float): x-coordinate.
 
         Returns:
         - int: Voxel ID containing the x-coordinate.
         """
-        region_idx = self.get_region_id(x)
+        region_idx = self.get_region_id_from_position(x)
         region = self.regions[region_idx]
         local_x = x - self.boundaries[region_idx]
-        return int(np.floor(local_x / region.voxel_width) + np.sum([reg.num_voxels for reg in self.regions[:region_idx]]))
-        
+        voxel_id_within_region = int(np.floor(local_x / region.voxel_width))
+        voxel_id_global = voxel_id_within_region + self.cumsum_voxels[region_idx]
+        return voxel_id_global
+            
     def get_voxel_width(self, x:float) -> float:
         """
         Determines the width of the voxel containing a given x-coordinate.
@@ -144,7 +143,7 @@ class Domain:
         Returns:
         - float: Width of the voxel containing the x-coordinate.
         """
-        region_idx = self.get_region_id(x)
+        region_idx = self.get_region_id_from_position(x)
         region = self.regions[region_idx]
         return region.voxel_width
     
@@ -163,13 +162,15 @@ class Domain:
         s[source_voxel_index] = source_strength
         return s
     
-    def compute_optical_thickness(self, x1:float, x2:float) -> float:
+    def compute_optical_thickness(self, x1:float, x2:float, start_region_idx:int, end_region_idx:int) -> float:
         """
         Computes the optical thickness between two positions.
 
         Parameters:
         - x1 (float): Starting x-coordinate.
         - x2 (float): Ending x-coordinate.
+        - start_region_idx (int): Region index of start position.
+        - end_region_idx (int): Region index of end position.
 
         Returns:
         - float: Optical thickness between x1 and x2.
@@ -177,9 +178,6 @@ class Domain:
         # Since transport is symmetric, it does not matter which direction is traveled. Let's set it to travel left to right.
         if x1 > x2:
             x1, x2 = x2, x1
-        
-        start_region_idx = self.get_region_id(x1)
-        end_region_idx = self.get_region_id(x2)
         
         right_of_x1 = self.boundaries[start_region_idx + 1] - x1
         left_of_x2 = x2 - self.boundaries[end_region_idx]
@@ -192,20 +190,22 @@ class Domain:
         tau = np.dot(widths, sigmas)
         return tau
     
-    def compute_streaming_operator(self, start_position:float, end_position:float) -> float:
+    def compute_streaming_operator(self, start_position:float, end_position:float, start_region_idx:int, end_region_idx:int) -> float:
         """
         Computes the streaming operator between two positions.
 
         Parameters:
         - start_position (float): Starting position.
         - end_position (float): Ending position.
+        - start_region_idx (int): Region index of start position.
+        - end_region_idx (int): Region index of end position.
 
         Returns:
         - float: Streaming operator value.
         """
         if start_position == end_position:
             return 1.0 #TODO need to discuss what this value should be. Perhaps it should not even be computed and simply skipped.
-        tau = self.compute_optical_thickness(start_position, end_position)
+        tau = self.compute_optical_thickness(start_position, end_position, start_region_idx, end_region_idx)
         streaming_operator = (1/2) * sc.exp1(tau) #TODO need to update to include voxel_size in future PR. Concerns about implementation with varying voxel_size.
         return streaming_operator
     
@@ -217,31 +217,43 @@ class Domain:
         - np.ndarray: Transition matrix.
         """
         K_trans = np.zeros((self.num_voxels, self.num_voxels))
+    
+        # Iterate region index rather than calling self.get_region_from_voxel_index().
+        region_idx_i = 0
         
-        # Create a dictionary where the keys are voxel ids and values are list of positions within that voxel.
-        voxel_positions = dict()
-        for pos in self.positions:
-            voxel_id = self.get_voxel_id(pos)
-            if voxel_id not in voxel_positions:
-                voxel_positions[voxel_id] = []
-            voxel_positions[voxel_id].append(pos)
-        
-        # Now iterate through all of the combinations of voxel pairs and average the position combinations within those voxels.
         for i in range(self.num_voxels):
-            positions_i = voxel_positions[i]
+            # Update region index if necessary.
+            while i >= self.cumsum_voxels[region_idx_i + 1]:
+                region_idx_i += 1
+            region_i = self.regions[region_idx_i]
+            
+            # Find start_x for voxel_i = region_edge + num_voxels_incremented*voxel_width.
+            voxel_start_x_i = self.boundaries[region_idx_i] + (i - self.cumsum_voxels[region_idx_i]) * region_i.voxel_width
+            
+            # Generate positions dynamically. 
+            positions_i = region_i.generate_positions(voxel_start_x_i)
             num_positions_i = len(positions_i)
             
+            region_idx_j = region_idx_i
+            
             for j in range(i, self.num_voxels):
-                positions_j = voxel_positions[j]
+                while j >= self.cumsum_voxels[region_idx_j + 1]:
+                    region_idx_j += 1
+                
+                region_j = self.regions[region_idx_j]
+                voxel_start_x_j = self.boundaries[region_idx_j] + (j - self.cumsum_voxels[region_idx_j]) * region_j.voxel_width
+                positions_j = region_j.generate_positions(voxel_start_x_j)
                 num_positions_j = len(positions_j)
                 
                 streaming_sum = 0.0
                 for pos_i in positions_i:
                     for pos_j in positions_j:
-                        streaming_sum += self.compute_streaming_operator(pos_i, pos_j)
+                        streaming_sum += self.compute_streaming_operator(pos_i, pos_j, region_idx_i, region_idx_j)
+                
                 avg_streaming_operator = streaming_sum / (num_positions_i * num_positions_j)
-                K_trans[i,j] = avg_streaming_operator
-                K_trans[j,i] = avg_streaming_operator
+                K_trans[i, j] = avg_streaming_operator
+                K_trans[j, i] = K_trans[i, j]
+
         return K_trans
 
     def compute_neutron_flux(self, source_voxel_index:int, source_strength:float = 1.) -> np.ndarray:
@@ -261,10 +273,11 @@ class Domain:
         K_trans = self.construct_transition_matrix()
         logging.info(f"Constructed transition matrix: {K_trans}")
         
-        sigma_s = []
-        for region in self.regions:
-            sigma_s.extend([region.scattering_cross_section] * region.num_voxels)
-        sigma_s = np.array(sigma_s)
+        sigma_s = np.zeros(self.num_voxels)
+        for region_idx, region in enumerate(self.regions):
+            first_voxel_idx = self.cumsum_voxels[region_idx]
+            last_voxel_idx = self.cumsum_voxels[region_idx + 1] - 1
+            sigma_s[first_voxel_idx:last_voxel_idx] = region.scattering_cross_section
         sigma_s_matrix = np.diag(sigma_s)
         logging.info(f"Constructed sigma_s matrix: {sigma_s_matrix}")
         

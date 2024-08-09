@@ -9,8 +9,6 @@ def test_region_properties():
     """
     region = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
     assert region.voxel_width == 2.0
-    positions = region.generate_positions(start_x=0.0)
-    assert len(positions) == 15  # 5 voxels, 3 positions each
 
 def test_domain_initialization():
     """
@@ -21,7 +19,6 @@ def test_domain_initialization():
     domain = Domain(start_x=0.0, regions=[region1, region2])
     
     assert domain.num_voxels == 15
-    assert len(domain.positions) == 35  # 5*3 + 10*2
 
 def test_source_term():
     """
@@ -42,7 +39,7 @@ def test_optical_thickness():
     region2 = Region(width=20.0, num_voxels=10, scattering_cross_section=0.1, positions_per_voxel=2, position_location_str='random')
     domain = Domain(start_x=0.0, regions=[region1, region2])
     
-    tau = domain.compute_optical_thickness(x1=1.0, x2=15.0)
+    tau = domain.compute_optical_thickness(x1=1.0, x2=15.0, start_region_idx = 0, end_region_idx = 1)
     expected_tau = (0.2 * 9.0) + (0.1 * 5.0)  # part of region1 and part of region2
     assert np.isclose(tau, expected_tau)
 
@@ -54,7 +51,7 @@ def test_streaming_operator():
     region2 = Region(width=20.0, num_voxels=10, scattering_cross_section=0.1, positions_per_voxel=2, position_location_str='random')
     domain = Domain(start_x=0.0, regions=[region1, region2])
     
-    operator = domain.compute_streaming_operator(start_position=1.0, end_position=15.0)
+    operator = domain.compute_streaming_operator(start_position=1.0, end_position=15.0, start_region_idx = 0, end_region_idx = 1)
     tau = (0.2 * 9.0) + (0.1 * 5.0)
     expected_operator = (1/2) * sc.exp1(tau)
     assert np.isclose(operator, expected_operator)
