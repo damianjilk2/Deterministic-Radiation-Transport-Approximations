@@ -29,6 +29,7 @@ class Region:
         self.positions_per_voxel = positions_per_voxel
         self.position_location_str = position_location_str
         self.start_x = 0 # Initialize region start value.
+        self.first_voxel_id = 0 # Initializes first voxel id.
         
     @property
     def voxel_width(self) -> float:
@@ -40,21 +41,46 @@ class Region:
         """
         return self.width / self.num_voxels
     
-    def generate_positions(self, start_x: float) -> np.ndarray:
+    def get_local_voxel_id(self, x:float) -> int:
+        """
+        Get the voxel index relative to the scope of the region. 
+
+        Parameters:
+        - x (float): x-coordinate within the voxel.
+
+        Returns:
+            int: Local voxel index.
+        """
+        return int(np.floor( (x - self.start_x) / self.voxel_width))
+    
+    def get_global_voxel_id(self, x:float) -> int:
+        """
+        Get the voxel index relative to the entire global scope.
+
+        Parameters:
+        - x (float): x-coordinate within the voxel.
+
+        Returns:
+            int: Global voxel index.
+        """
+        return self.get_local_voxel_id(x) + self.first_voxel_id
+    
+    def generate_positions(self, voxel_id: int) -> np.ndarray:
         """
         Generates positions within a single voxel based on the specified strategy.
 
         Parameters:
-        - start_x (float): Starting x-coordinate for the voxel.
+        - voxel_id (int): Voxel index in which you wish to generate positions.
 
         Returns:
         - np.ndarray: Array of positions within the voxel.
         """
-        voxel_end = start_x + self.voxel_width
+        voxel_start_x = self.start_x + (voxel_id - self.first_voxel_id) * self.voxel_width
+        voxel_end_x = voxel_start_x + self.voxel_width
         if self.position_location_str == 'evenly-spaced':
-            positions = np.linspace(start_x, voxel_end, self.positions_per_voxel + 2)[1:-1]
+            positions = np.linspace(voxel_start_x, voxel_end_x, self.positions_per_voxel + 2)[1:-1]
         elif self.position_location_str == 'random':
-            positions = sorted(random.uniform(start_x, voxel_end) for _ in range(self.positions_per_voxel))
+            positions = sorted(random.uniform(voxel_start_x, voxel_end_x) for _ in range(self.positions_per_voxel))
         return np.array(positions)
 
 class Domain:
@@ -70,22 +96,17 @@ class Domain:
         self.regions = regions
         self.widths = np.array([region.width for region in regions])
         self.sigmas = np.array([region.scattering_cross_section for region in regions])
-        self.num_voxels = sum(region.num_voxels for region in self.regions)
         self.cumsum_voxels = np.cumsum([0] + [region.num_voxels for region in self.regions])
-        self._compute_boundaries()
-        
-    def _compute_boundaries(self) -> np.ndarray:
-        """
-        Computes the boundary positions of each region within the domain. 
-        
-        Includes starting and ending edges of the domain.
-
-        Returns:
-        - np.ndarray: Array of boundary positions.
-        """
         self.boundaries = np.cumsum([self.start_x] + [region.width for region in self.regions])
-        for start_x, region in zip(self.boundaries[:-1],self.regions):
-            region.start_x = start_x
+        
+        # Set start_x and first_voxel_id for each region.
+        for i, region in enumerate(self.regions):
+            region.start_x = self.boundaries[i]
+            region.first_voxel_id = self.cumsum_voxels[i]
+        
+    @property
+    def num_voxels(self):
+        return self.cumsum_voxels[-1]
 
     def get_region_id_from_position(self, x:float) -> int:
         """
@@ -113,25 +134,6 @@ class Domain:
         - int: Region ID containing the voxel.
         """
         return np.searchsorted(self.cumsum_voxels, voxel_index, side='right') - 1
-    
-    def get_voxel_id(self, x: float) -> int:
-        """
-        Determines the voxel ID for a given x-coordinate.
-
-        Note: an error is thrown when the given x-coordinate is out of bounds or on the right boundary.
-
-        Parameters:
-        - x (float): x-coordinate.
-
-        Returns:
-        - int: Voxel ID containing the x-coordinate.
-        """
-        region_idx = self.get_region_id_from_position(x)
-        region = self.regions[region_idx]
-        local_x = x - self.boundaries[region_idx]
-        voxel_id_within_region = int(np.floor(local_x / region.voxel_width))
-        voxel_id_global = voxel_id_within_region + self.cumsum_voxels[region_idx]
-        return voxel_id_global
             
     def get_voxel_width(self, x:float) -> float:
         """
@@ -144,8 +146,7 @@ class Domain:
         - float: Width of the voxel containing the x-coordinate.
         """
         region_idx = self.get_region_id_from_position(x)
-        region = self.regions[region_idx]
-        return region.voxel_width
+        return self.regions[region_idx].voxel_width
     
     def construct_source_term(self, source_voxel_index:int, source_strength:float=1.) -> np.ndarray:
         """
@@ -218,31 +219,26 @@ class Domain:
         """
         K_trans = np.zeros((self.num_voxels, self.num_voxels))
     
-        # Iterate region index rather than calling self.get_region_from_voxel_index().
         region_idx_i = 0
+        region_i = self.regions[region_idx_i]
         
         for i in range(self.num_voxels):
-            # Update region index if necessary.
-            while i >= self.cumsum_voxels[region_idx_i + 1]:
+            if i >= self.cumsum_voxels[region_idx_i + 1]:
                 region_idx_i += 1
-            region_i = self.regions[region_idx_i]
+                region_i = self.regions[region_idx_i]
             
-            # Find start_x for voxel_i = region_edge + num_voxels_incremented*voxel_width.
-            voxel_start_x_i = self.boundaries[region_idx_i] + (i - self.cumsum_voxels[region_idx_i]) * region_i.voxel_width
-            
-            # Generate positions dynamically. 
-            positions_i = region_i.generate_positions(voxel_start_x_i)
+            positions_i = region_i.generate_positions(i)
             num_positions_i = len(positions_i)
             
             region_idx_j = region_idx_i
+            region_j = self.regions[region_idx_j]
             
             for j in range(i, self.num_voxels):
-                while j >= self.cumsum_voxels[region_idx_j + 1]:
+                if j >= self.cumsum_voxels[region_idx_j + 1]:
                     region_idx_j += 1
+                    region_j = self.regions[region_idx_j]
                 
-                region_j = self.regions[region_idx_j]
-                voxel_start_x_j = self.boundaries[region_idx_j] + (j - self.cumsum_voxels[region_idx_j]) * region_j.voxel_width
-                positions_j = region_j.generate_positions(voxel_start_x_j)
+                positions_j = region_j.generate_positions(j)
                 num_positions_j = len(positions_j)
                 
                 streaming_sum = 0.0
