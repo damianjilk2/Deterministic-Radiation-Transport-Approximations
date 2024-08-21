@@ -1,101 +1,105 @@
-from drt_1d import (
-    construct_source_term,
-    calculate_K_trans,
-    construct_transition_matrix,
-    calculate_neutron_flux,
-)
+from drt_1d import Region, Domain, read_input, perform_calculation
 import numpy as np
+import scipy.special as sc
 import pytest
 
-def test_construct_source_term():
-    """Test the construction of the source term vector."""
-    
-    # Normal case
-    s = construct_source_term(6, 2)
-    expected_s = np.zeros(6)
-    expected_s[2] = 1
-    np.testing.assert_array_equal(s, expected_s)
-    
-    # Edge case: Zero voxels
-    with pytest.raises(ValueError):
-        construct_source_term(0, 0)
-    
-    # Edge case: Negative index
-    with pytest.raises(IndexError):
-        construct_source_term(6, -1)
-    
-    # Edge case: Index out of bounds
-    with pytest.raises(IndexError):
-        construct_source_term(6, 10)
-    
-    # Edge case: Zero source strength
-    s_zero_strength = construct_source_term(6, 2, 0)
-    expected_s_zero_strength = np.zeros(6)
-    np.testing.assert_array_equal(s_zero_strength, expected_s_zero_strength)
-    
-    # Edge case: Large number of voxels
-    s_large = construct_source_term(10000, 5000)
-    assert s_large[5000] == 1 and np.sum(s_large) == 1
+def test_region_properties():
+    """
+    Test properties and methods of the Region class.
+    """
+    region = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
+    assert region.voxel_width == 2.0
 
-def test_calculate_K_trans():
-    """Test calculation of transition probability between voxel centers."""
+def test_domain_initialization():
+    """
+    Test initialization and properties of the Domain class.
+    """
+    region1 = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
+    region2 = Region(width=20.0, num_voxels=10, scattering_cross_section=0.1, positions_per_voxel=2, position_location_str='random')
+    domain = Domain(start_x=0.0, regions=[region1, region2])
     
-    # Normal case
-    sigma_s_matrix = np.diag([0.2, 0.1, 0.2, 0.1, 0.3, 0.2])
-    K = calculate_K_trans(1, 4, 2.0, sigma_s_matrix)
-    expected_K = np.exp(-((0.1+0.2+0.1)*2.0)) / (4 * np.pi * (3 * 2.0)**2)  # Expected transition probability
-    np.testing.assert_almost_equal(K, expected_K, decimal=5)
-    
-    # Edge case: Zero voxel size
-    with pytest.raises(ValueError):
-        calculate_K_trans(1, 4, 0.0, sigma_s_matrix)
-    
-    # Edge case: Negative ri
-    with pytest.raises(ValueError):
-        calculate_K_trans(-1, 4, 2.0, sigma_s_matrix)
-    
-    # Edge case: Negative rj
-    with pytest.raises(ValueError):
-        calculate_K_trans(1, -1, 2.0, sigma_s_matrix)
-    
-    # Edge case: ri out of range
-    with pytest.raises(ValueError):
-        calculate_K_trans(10, 4, 2.0, sigma_s_matrix)
-    
-    # Edge case: rj out of range
-    with pytest.raises(ValueError):
-        calculate_K_trans(1, 10, 2.0, sigma_s_matrix)
+    assert domain.num_voxels == 15
 
-def test_construct_transition_matrix():
-    """Test construction of the transition matrix."""
-    
-    # Normal case
-    sigma_s_matrix = np.diag([0.2, 0.1, 0.2, 0.1, 0.3, 0.2])
-    K_trans = construct_transition_matrix(6, 2.0, sigma_s_matrix)
-    assert K_trans.shape == (6, 6)
-    
-    # Edge case: Zero num_voxels
-    with pytest.raises(ValueError):
-        construct_transition_matrix(0, 2.0, sigma_s_matrix)
-    
-    # Edge case: Zero voxel size
-    with pytest.raises(ValueError):
-        construct_transition_matrix(6, 0.0, sigma_s_matrix)
+def test_source_term():
+    """
+    Test construction of the source term vector.
+    """
+    region1 = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
+    region2 = Region(width=20.0, num_voxels=10, scattering_cross_section=0.1, positions_per_voxel=2, position_location_str='random')
+    domain = Domain(start_x=0.0, regions=[region1, region2])
+    source_term = domain.construct_source_term(source_voxel_index=2, source_strength=1.0)
+    assert source_term[2] == 1.0
+    assert np.sum(source_term) == 1.0
 
-def test_calculate_neutron_flux():
-    """Test calculation of the neutron flux vector."""
+def test_optical_thickness():
+    """
+    Test computation of optical thickness.
+    """
+    region1 = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
+    region2 = Region(width=20.0, num_voxels=10, scattering_cross_section=0.1, positions_per_voxel=2, position_location_str='random')
+    domain = Domain(start_x=0.0, regions=[region1, region2])
     
-    # Normal case
-    sigma_s_matrix = np.diag([0.2, 0.1, 0.2, 0.1, 0.3, 0.2])
-    K_trans = construct_transition_matrix(6, 2.0, sigma_s_matrix)
-    s = construct_source_term(6, 2)
-    phi = calculate_neutron_flux(K_trans, sigma_s_matrix, s)
-    assert len(phi) == 6
+    tau = domain.compute_optical_thickness(x1=1.0, x2=15.0, start_region_idx = 0, end_region_idx = 1)
+    expected_tau = (0.2 * 9.0) + (0.1 * 5.0)  # part of region1 and part of region2
+    assert np.isclose(tau, expected_tau)
+
+def test_streaming_operator():
+    """
+    Test computation of streaming operator.
+    """
+    region1 = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
+    region2 = Region(width=20.0, num_voxels=10, scattering_cross_section=0.1, positions_per_voxel=2, position_location_str='random')
+    domain = Domain(start_x=0.0, regions=[region1, region2])
     
-    # Edge case: Zero source term
-    s_zero = np.zeros(6)
-    phi_zero = calculate_neutron_flux(K_trans, sigma_s_matrix, s_zero)
-    assert np.all(phi_zero == 0)
+    operator = domain.compute_streaming_operator(start_position=1.0, end_position=15.0, start_region_idx = 0, end_region_idx = 1)
+    tau = (0.2 * 9.0) + (0.1 * 5.0)
+    expected_operator = (1/2) * sc.exp1(tau)
+    assert np.isclose(operator, expected_operator)
+
+def test_transition_matrix():
+    """
+    Test construction of the transition matrix.
+    """
+    region1 = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
+    region2 = Region(width=20.0, num_voxels=10, scattering_cross_section=0.1, positions_per_voxel=2, position_location_str='random')
+    domain = Domain(start_x=0.0, regions=[region1, region2])
+    
+    K_trans = domain.construct_transition_matrix()
+    assert K_trans.shape == (15, 15)
+
+def test_neutron_flux():
+    """
+    Test calculation of the neutron flux vector.
+    """
+    region1 = Region(width=10.0, num_voxels=5, scattering_cross_section=0.2, positions_per_voxel=3, position_location_str='evenly-spaced')
+    region2 = Region(width=20.0, num_voxels=10, scattering_cross_section=0.1, positions_per_voxel=2, position_location_str='random')
+    domain = Domain(start_x=0.0, regions=[region1, region2])
+    
+    phi = domain.compute_neutron_flux(source_voxel_index=2, source_strength=1.0)
+    assert len(phi) == 15
+
+def test_read_input():
+    """
+    Test reading input data from a file.
+    """
+    with pytest.raises(FileNotFoundError):
+        read_input('nonexistent_file.json')
+
+def test_perform_calculation():
+    """
+    Test the perform_calculation function.
+    """
+    input_data = {
+        'start_x': 0.0,
+        'regions': [
+            {'width': 10.0, 'num_voxels': 5, 'positions_per_voxel': 3, 'position_location': 'evenly-spaced', 'scattering_cross_section': 0.2},
+            {'width': 20.0, 'num_voxels': 10, 'positions_per_voxel': 2, 'position_location': 'random', 'scattering_cross_section': 0.1}
+        ],
+        'source': {'voxel_index': 2, 'strength': 1.0}
+    }
+    
+    phi = perform_calculation(input_data['start_x'], input_data['regions'], input_data['source'])
+    assert len(phi) == 15
 
 if __name__ == "__main__":
     import pytest
